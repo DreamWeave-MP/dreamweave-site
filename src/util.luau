@@ -17,14 +17,16 @@ function util.trim(text: string): string
   return string.match(text, '^%s*(.*%S)') or ''
 end
 
---- `value` as text with the five characters HTML reserves spelled as entities.
+--- `value` as text with the five characters HTML reserves spelled as entities. Each is looked
+--- for before it is replaced: most text holds none, and a search is cheaper than a substitution
+--- that finds nothing.
 function util.escapeHtml(value: unknown): string
   local text = tostring(value)
-  text = string.gsub(text, '&', '&amp;')
-  text = string.gsub(text, '<', '&lt;')
-  text = string.gsub(text, '>', '&gt;')
-  text = string.gsub(text, '"', '&quot;')
-  text = string.gsub(text, "'", '&#x27;')
+  if string.find(text, '&', 1, true) then text = string.gsub(text, '&', '&amp;') end
+  if string.find(text, '<', 1, true) then text = string.gsub(text, '<', '&lt;') end
+  if string.find(text, '>', 1, true) then text = string.gsub(text, '>', '&gt;') end
+  if string.find(text, '"', 1, true) then text = string.gsub(text, '"', '&quot;') end
+  if string.find(text, "'", 1, true) then text = string.gsub(text, "'", '&#x27;') end
 
   return text
 end
