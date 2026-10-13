@@ -1,0 +1,296 @@
+--!strict
+--!native
+-- The site generator, timed from Luau through what it exports: loading a site (scan, shortcodes,
+-- Markdown), the whole build to the last file written, and each stage on its own over the same
+-- site's text. Run by `jess run --capability filesystem.read --capability filesystem.write
+-- --package . bench/bench.luau <scratch folder> [site root] [filter]`, on a release build. With
+-- no site root it builds the suite's fixture site, and checks the build against the tree the
+-- suite pins.
+--
+-- Prints one line per workload: its name, a tab, and the seconds one call takes. Every call of a
+-- workload must return the digest its first call did, and the digests are printed on lines that
+-- start with `#`, so two runs over one site can be told to have done the same work.
+local bytes = require '@dream/bytes'
+local expr = require '@dreamweave/site/expr'
+local json = require '@dreamweave/site/json'
+local markdown = require '@dreamweave/site/markdown'
+local sass = require '@dreamweave/site/sass'
+local site = require '@dreamweave/site'
+local tera = require '@dreamweave/site/tera'
+local util = require '@dreamweave/site/util'
+
+-- A build without the verified toolchain runs Luau slower than a release does, so a number from
+-- one says nothing about what ships.
+if not jess.bench.verified then
+  error('site bench: this jess was built without the verified toolchain: measure on a release build', 0)
+end
+
+--- Where this file is, from its chunk name.
+local function here(): string
+  local source = debug.info(1, 's')
+  local first = string.sub(source, 1, 1)
+  local path = if first == '@' or first == '=' then string.sub(source, 2) else source
+
+  return string.match(path, '^(.*)/[^/]*$') or '.'
+end
+
+local scratch: string, given: string?, filter: string? = ...
+local only = if filter and filter ~= '' then filter else nil
+local root = if given and given ~= '' then given else `{here()}/../tests/fixtures/site`
+local pinned = if given and given ~= '' then nil else `{here()}/../tests/fixtures/expected`
+local public = `{scratch}/public`
+
+assert(scratch and scratch ~= '', 'site bench: a scratch folder to build into is required')
+
+export type Row = { name: string, seconds: number, digest: string }
+
+local rows: { Row } = {}
+
+local function median(samples: { number }): number
+  table.sort(samples)
+  return samples[(#samples + 1) // 2]
+end
+
+--- The digest of a list of strings, each framed by its length so no two lists share one.
+local function digest(parts: { string }): string
+  local framed = table.create(#parts * 2)
+  for _, part in parts do
+    table.insert(framed, `{#part}:`)
+    table.insert(framed, part)
+  end
+
+  return string.sub(bytes.sha256(table.concat(framed)), 1, 16)
+end
+
+--- The digest of every file below `folder`: its relative path and its bytes.
+local function treeDigest(folder: string): string
+  local parts = {}
+  for _, entry in util.walk(folder) do
+    table.insert(parts, entry.relative)
+    table.insert(parts, assert(jess.fs.read(entry.path)))
+  end
+
+  return digest(parts)
+end
+
+--- Seconds per call of `body`: warmed up, then the median of seven batches of a size that takes
+--- about a tenth of a second, with a full collection between them. Every checked call must
+--- return what the first did.
+local function measure(name: string, body: () -> string)
+  if only and not string.find(name, only, 1, true) then return end
+
+  jess.bench.collect()
+  local first = body()
+  local start = os.clock()
+  local second = body()
+  local once = math.max(os.clock() - start, 1e-7)
+  local iterations = math.max(1, math.floor(0.1 / once))
+  local samples = {}
+
+  for batch = 1, 7 do
+    jess.bench.collect()
+    start = os.clock()
+    for _ = 1, iterations do
+      body()
+    end
+
+    samples[batch] = (os.clock() - start) / iterations
+  end
+
+  local last = body()
+  if second ~= first or last ~= first then
+    error(`site bench: {name} returned {second} and {last} after {first}`, 0)
+  end
+
+  table.insert(rows, { name = name, seconds = median(samples), digest = first })
+end
+
+local loaded = site.load(root)
+local items = {}
+
+for _, section in loaded.sections do
+  table.insert(items, { item = section, isPage = false })
+end
+
+for _, page in loaded.pages do
+  table.insert(items, { item = page, isPage = true })
+end
+
+local rendered = [for entry in items if entry.item.render and not entry.item.draft and not entry.item.redirect_to => entry]
+local sources = [for entry in items => entry.item.raw :: string]
+local lines = {}
+
+for _, source in sources do
+  for line in string.gmatch(source, '[^\n]+') do
+    table.insert(lines, line)
+  end
+end
+
+measure('load: scan, shortcodes and markdown', function(): string
+  local fresh = site.load(root)
+  local parts = {}
+
+  for _, section in fresh.sections do
+    table.insert(parts, section.content)
+  end
+
+  for _, page in fresh.pages do
+    table.insert(parts, page.content)
+    table.insert(parts, page.summary)
+  end
+
+  return digest(parts)
+end)
+
+measure('build: the whole site, load to last write', function(): string
+  local report = site.build(root, public, {})
+  return `{report.pages} pages, {report.sections} sections, {report.search} indexes`
+end)
+
+if not only or string.find('build: the whole site, load to last write', only, 1, true) then
+  local built = treeDigest(public)
+  if pinned and built ~= treeDigest(pinned) then
+    error('site bench: the fixture site no longer builds the tree the suite pins', 0)
+  end
+
+  rows[#rows].digest ..= `, tree {built}`
+end
+
+measure('render: every item through its template', function(): string
+  return digest([for entry in rendered => loaded:renderItem(entry.item, entry.isPage) :: string])
+end)
+
+measure('markdown: every item\'s source as a document', function(): string
+  local options = {
+    insertAnchorLinks = 'right',
+    resolveLink = function(href: string): string return loaded:resolveContentLink(href) end,
+  }
+
+  return digest([for source in sources => markdown.renderDocument(source, options).html :: string])
+end)
+
+measure('markdown: every line as inline text', function(): string
+  return digest([for line in lines => markdown.inline(line) :: string])
+end)
+
+local stylesheets = {}
+
+for _, entry in util.walk(`{root}/sass`) do
+  local name = jess.fs.fileName(entry.relative)
+  if string.match(name, '%.s[ac]ss$') and string.sub(name, 1, 1) ~= '_' then table.insert(stylesheets, entry.path) end
+end
+
+measure('sass: every stylesheet, imports expanded', function(): string
+  return digest([for path in stylesheets => sass.compileFile(path) :: string])
+end)
+
+measure('search: clean every body and encode the index', function(): string
+  return digest { json.encode(loaded:searchItems(), false) }
+end)
+
+local metadata = json.array()
+
+for _, entry in items do
+  local item = entry.item
+  table.insert(
+    metadata,
+    json.object({
+      title = item.title,
+      path = item.path,
+      permalink = item.permalink,
+      description = item.description,
+      words = item.word_count,
+      weight = item.weight,
+      draft = item.draft,
+      ancestors = json.arrayCopy(item.ancestors),
+      toc = json.arrayCopy(item.toc),
+      raw = item.raw,
+    }, { 'title', 'path' })
+  )
+end
+
+measure('json: every item\'s metadata, compact and pretty', function(): string
+  return digest { json.encode(metadata, false), json.encode(metadata) }
+end)
+
+local templates = [for entry in util.walk(`{root}/templates`) => entry.relative :: string]
+
+measure('tera: parse every template', function(): string
+  local engine = tera.Engine.new(root, {})
+  return `{sum[for name in templates => #engine:parse(name)]} nodes in {#templates} templates`
+end)
+
+local Expressions = {
+  'page.title',
+  'page.title | upper | truncate(length=12)',
+  'config.extra',
+  'page.word_count * 2 + page.reading_time // 1',
+  'page.toc | length > 3 and page.title is starting_with("A")',
+  'page.ancestors | reverse | join(sep="/")',
+  'page.title ~ " | " ~ config.title',
+  'page.description | default(value=config.description) | striptags | trim',
+  'page.permalink | replace(from="https://", to="") | split(pat="/") | first',
+  '[1, 2, 3] | concat(with=page.weight) | length',
+  'page.draft or not page.render or page.missing is defined',
+  'page.slug | slugify | capitalize',
+  '"docs" in page.path and page.weight >= 0',
+  'page.toc | map(attribute="title") | sort | slice(end=3) | join(sep=", ")',
+  'range(end=8) | filter | length',
+}
+
+measure('expr: fifteen expressions against every item', function(): string
+  local parts = {}
+
+  for _, entry in items do
+    local environment = tera.Env.new(loaded.engine, { page = entry.item, config = loaded.config })
+    for _, text in Expressions do
+      table.insert(parts, tostring(expr.unwrap(expr.eval(text, environment))))
+    end
+  end
+
+  -- A table's address differs from run to run: only its being one is checked.
+  return digest([for part in parts => if string.sub(part, 1, 7) == 'table: ' then 'table' else part])
+end)
+
+measure('util: escapeHtml over every line', function(): string
+  return digest([for line in lines => util.escapeHtml(line) :: string])
+end)
+
+measure('util: trim over every line', function(): string
+  return digest([for line in lines => util.trim(line) :: string])
+end)
+
+measure('util: slugify over every line', function(): string
+  return digest([for line in lines => util.slugify(line) :: string])
+end)
+
+measure('util: split every line on spaces', function(): string
+  return `{sum[for line in lines => #util.split(line, ' ')]} words`
+end)
+
+local Globs = { '**/*.md', 'docs/**', '**/_index.md', 'docs/*/a?i/*.md', '*.draft.md' }
+local relatives = [for entry in util.walk(`{root}/content`) => entry.relative :: string]
+
+measure('util: five globs against every content path', function(): string
+  local matched = 0
+
+  for _, relative in relatives do
+    matched += #[for glob in Globs if util.globMatch(relative, glob) => glob]
+  end
+
+  return `{matched} matches over {#relatives} paths`
+end)
+
+local content = `{root}/content`
+
+measure('util: walk the content folder', function(): string return `{#util.walk(content)} files` end)
+
+for _, row in rows do
+  print(`# {row.name}: {row.digest}`)
+end
+
+for _, row in rows do
+  print(`{row.name}\t{string.format('%.9f', row.seconds)}`)
+end
+
+return rows
