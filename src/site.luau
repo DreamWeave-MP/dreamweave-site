@@ -134,14 +134,20 @@ function Site:registerFunctions()
     end)
 end
 
-function Site:isIgnored(relative)
-    local hit=rawget(self.ignoreCache,relative);if hit~=nil then return hit end
-    local ignored=false
-    for _,pattern in ipairs(self.config.ignored_content or {}) do
-        if Util.globMatch(relative,pattern) or Util.globMatch('content/'..relative,pattern) then ignored=true;break end
-    end
-    self.ignoreCache[relative]=ignored
-    return ignored
+--- Whether a content path matches one of the site's `ignored_content` globs, as it stands or
+--- below `content/`. The answer is kept for the next time the path is asked about.
+function Site:isIgnored(relative: string): boolean
+  local known = rawget(self.ignoreCache, relative)
+  if known ~= nil then return known end
+
+  local patterns = self.config.ignored_content or {}
+  local ignored = any[
+    for pattern in patterns
+    => Util.globMatch(relative, pattern) or Util.globMatch(`content/{relative}`, pattern)
+  ]
+
+  self.ignoreCache[relative] = ignored
+  return ignored
 end
 
 function Site:scan()
@@ -464,11 +470,18 @@ function Site:buildSearch(public)
     Util.write(jess.fs.join(public,name),JsonOut.encode(self:searchItems(),false))
     return 1
 end
+--- The pages a feed lists: rendered, not drafts, and dated; newest first, then by address.
 function Site:feedPages()
-    local pages={}
-    for _,p in ipairs(self.pages) do if p.render and not p.draft and p.date then table.insert(pages,p) end end
-    table.sort(pages,function(a,b) local ad=tostring(a.date or '');local bd=tostring(b.date or '');if ad~=bd then return ad>bd end return tostring(a.permalink)<tostring(b.permalink) end)
-    return pages
+  local pages = [for page in self.pages if page.render and not page.draft and page.date => page]
+
+  table.sort(pages, function(left, right)
+    local leftDate, rightDate = tostring(left.date or ''), tostring(right.date or '')
+    if leftDate ~= rightDate then return leftDate > rightDate end
+
+    return tostring(left.permalink) < tostring(right.permalink)
+  end)
+
+  return pages
 end
 function Site:atomFeed(feedUrl,pages,section,term)
     local o={'<?xml version="1.0" encoding="UTF-8"?>\n<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="',xmlEscape(self.config.default_language or 'en'),'">\n<title>',xmlEscape(self.config.title or '')}
@@ -506,14 +519,33 @@ function Site:buildAliases(public)
     for _,item in ipairs(self.pages) do for _,alias in ipairs(item.aliases or {}) do local rel=norm(alias);if rel~='' then local dest=string.match(rel,'%.html$') and rel or (string.gsub(rel,'/+$','')..'/index.html');local html='<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url='..Util.escapeAttribute(item.permalink)..'"><link rel="canonical" href="'..Util.escapeAttribute(item.permalink)..'">';Util.write(jess.fs.join(public,dest),html);count+=1 end end end
     return count
 end
-function Site:buildSitemap(public)
-    local entries={}
-    for _,s in ipairs(self.sections) do if s.render and not s.draft and not s.redirect_to then table.insert(entries,s) end end
-    for _,p in ipairs(self.pages) do if p.render and not p.draft and not p.redirect_to then table.insert(entries,p) end end
-    table.sort(entries,function(a,b)return tostring(a.permalink)<tostring(b.permalink) end)
-    local out={'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'}
-    for _,x in ipairs(entries) do table.insert(out,'<url><loc>'..xmlEscape(x.permalink)..'</loc>');if x.updated then table.insert(out,'<lastmod>'..xmlEscape(x.updated)..'</lastmod>') end;table.insert(out,'</url>\n') end
-    table.insert(out,'</urlset>\n');Util.write(jess.fs.join(public,'sitemap.xml'),table.concat(out));return 1
+--- Writes `sitemap.xml`: every section and page that has a page of its own, by address.
+function Site:buildSitemap(public: string): number
+  local entries = [
+    for section in self.sections
+    if section.render and not section.draft and not section.redirect_to
+    => section
+  ]
+
+  for _, page in self.pages do
+    if page.render and not page.draft and not page.redirect_to then table.insert(entries, page) end
+  end
+
+  table.sort(entries, function(left, right) return tostring(left.permalink) < tostring(right.permalink) end)
+
+  local out = { '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' }
+
+  for _, entry in entries do
+    table.insert(out, `<url><loc>{xmlEscape(entry.permalink)}</loc>`)
+    if entry.updated then table.insert(out, `<lastmod>{xmlEscape(entry.updated)}</lastmod>`) end
+
+    table.insert(out, '</url>\n')
+  end
+
+  table.insert(out, '</urlset>\n')
+  Util.write(jess.fs.join(public, 'sitemap.xml'), table.concat(out))
+
+  return 1
 end
 function Site:buildRobots(public)
     local path=jess.fs.join(public,'robots.txt');if jess.fs.isFile(path) then return 0 end
