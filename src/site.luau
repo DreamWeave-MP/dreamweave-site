@@ -140,11 +140,15 @@ function Site:isIgnored(relative: string): boolean
   local known = rawget(self.ignoreCache, relative)
   if known ~= nil then return known end
 
-  local patterns = self.config.ignored_content or {}
-  local ignored = any[
-    for pattern in patterns
-    => Util.globMatch(relative, pattern) or Util.globMatch(`content/{relative}`, pattern)
-  ]
+  -- The globs are whatever the site's configuration holds under that name, so they are walked
+  -- with `ipairs`, which refuses anything that is not a list, an empty string too.
+  local ignored = false
+  for _, pattern in ipairs(self.config.ignored_content or {}) do
+    if Util.globMatch(relative, pattern) or Util.globMatch(`content/{relative}`, pattern) then
+      ignored = true
+      break
+    end
+  end
 
   self.ignoreCache[relative] = ignored
   return ignored
