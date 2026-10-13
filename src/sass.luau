@@ -139,18 +139,34 @@ local function evalColorFunction(value,env)
     end
     return nil
 end
-local function substitute(value,env)
-    value=tostring(value or '')
-    -- Interpolation can contain a variable or one of the tiny color functions used by DreamWeave's giscus theme.
-    value=string.gsub(value,'#{(.-)}',function(expr)
-        expr=trim(expr)
-        if string.sub(expr,1,1)=='$' then return tostring(envGet(env,string.sub(expr,2)) or '') end
-        return evalColorFunction(expr,env) or expr
+--- `value` with its `#{...}` interpolations and its `$variables` replaced from `env`, and worked
+--- out when what is left is one of the colour functions.
+local function substitute(value, env): string
+  local text = tostring(value or '')
+
+  -- Interpolation can contain a variable or one of the tiny color functions used by
+  -- DreamWeave's giscus theme.
+  if string.find(text, '#{', 1, true) then
+    text = string.gsub(text, '#{(.-)}', function(inner: string): string
+      local expression = trim(inner)
+      if string.sub(expression, 1, 1) == '$' then return tostring(envGet(env, string.sub(expression, 2)) or '') end
+
+      return evalColorFunction(expression, env) or expression
     end)
-    -- Plain Sass variable references.
-    value=string.gsub(value,'%$([%w_-]+)',function(name) local v=envGet(env,name);return v~=nil and tostring(v) or '$'..name end)
-    local f=evalColorFunction(value,env);if f then value=f end
-    return value
+  end
+
+  -- Plain Sass variable references.
+  if string.find(text, '$', 1, true) then
+    text = string.gsub(text, '%$([%w_-]+)', function(name: string): string
+      local bound = envGet(env, name)
+      return if bound ~= nil then tostring(bound) else `${name}`
+    end)
+  end
+
+  -- Only text that ends on a closing parenthesis can be a call.
+  if string.byte(text, -1) ~= 41 then return text end
+
+  return evalColorFunction(text, env) or text
 end
 
 local function splitSelectors(s)
