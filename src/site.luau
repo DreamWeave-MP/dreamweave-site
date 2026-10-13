@@ -277,18 +277,65 @@ local function feedDate(value,atom)
     if string.match(s,'^%d%d%d%d%-%d%d%-%d%d$') then return atom and (s..'T00:00:00+00:00') or s..' 00:00:00 +0000' end
     return s
 end
-local function cleanSearchBody(html,limit)
-    local s=tostring(html or '')
-    s=string.gsub(s,'<[Ss][Cc][Rr][Ii][Pp][Tt][^>]*>.-</[Ss][Cc][Rr][Ii][Pp][Tt]>',' ')
-    s=string.gsub(s,'<[Ss][Tt][Yy][Ll][Ee][^>]*>.-</[Ss][Tt][Yy][Ll][Ee]>',' ')
-    s=string.gsub(s,'<[Pp][Rr][Ee][^>]*>.-</[Pp][Rr][Ee]>',' ')
-    s=string.gsub(s,'<[^>]->',' ')
-    s=string.gsub(s,'&lt;','<');s=string.gsub(s,'&gt;','>');s=string.gsub(s,'&quot;','"');s=string.gsub(s,'&#x27;',"'");s=string.gsub(s,'&amp;','&')
-    local lines={}
-    for line in string.gmatch(s..'\n','(.-)\n') do local x=Util.trim((string.gsub(line,'%s+',' ')));if x~='' then table.insert(lines,x) end end
-    s=table.concat(lines,'\n')
-    if limit and #s>limit then s=string.sub(s,1,limit) end
-    return s
+-- The elements whose text is no part of a page's prose, from the opening tag to the first
+-- closing one, in any case.
+local ElementOptions = table.freeze { caseInsensitive = true, unicode = false, dotAll = true }
+local ScriptElement = Bytes.regex('<script[^>]*>.*?</script>', ElementOptions)
+local StyleElement = Bytes.regex('<style[^>]*>.*?</style>', ElementOptions)
+local PreElement = Bytes.regex('<pre[^>]*>.*?</pre>', ElementOptions)
+
+type Regex = typeof(ScriptElement)
+
+--- `text` with every `element` in it made one space.
+local function blankElements(text: string, element: Regex): string
+  -- `find` counts from zero, and the end it gives is the offset after the match.
+  local first, last = element:find(text, 0)
+  if not first then return text end
+
+  local kept = {}
+  local at = 0
+
+  while first do
+    table.insert(kept, string.sub(text, at + 1, first))
+    at = last
+    first, last = element:find(text, at)
+  end
+
+  table.insert(kept, string.sub(text, at + 1))
+  return table.concat(kept, ' ')
+end
+
+local CollapseSpaces = table.freeze { collapse = ' ' }
+local CollapseLines = table.freeze { collapse = '\n', trimStart = '\n', trimEnd = '\n' }
+
+--- `text` with every run of whitespace in a line made one space, each line trimmed, and the
+--- lines left empty dropped.
+local function squeezeLines(text: string): string
+  -- A line between two newlines has at most one space at each end once its runs are collapsed,
+  -- so taking the space beside every newline trims every line.
+  local spaced = Bytes.translate(`\n{text}\n`, '\t\v\f\r', '    ', CollapseSpaces)
+  spaced = string.gsub(spaced, ' \n', '\n')
+  spaced = string.gsub(spaced, '\n ', '\n')
+
+  return Bytes.translate(spaced, '', '', CollapseLines)
+end
+
+--- A page's HTML as the text a search index holds: no markup, no code blocks, entities read
+--- back, and no more than `limit` bytes when one is given.
+local function cleanSearchBody(html: unknown, limit: number?): string
+  local body = blankElements(tostring(html or ''), ScriptElement)
+  body = blankElements(body, StyleElement)
+  body = blankElements(body, PreElement)
+  body = string.gsub(body, '<[^>]->', ' ')
+  body = string.gsub(body, '&lt;', '<')
+  body = string.gsub(body, '&gt;', '>')
+  body = string.gsub(body, '&quot;', '"')
+  body = string.gsub(body, '&#x27;', "'")
+  body = string.gsub(body, '&amp;', '&')
+  body = squeezeLines(body)
+  if limit and #body > limit then body = string.sub(body, 1, limit) end
+
+  return body
 end
 function Site:searchItems()
     local cfg=self.config.search or {};local out=JsonOut.array()
