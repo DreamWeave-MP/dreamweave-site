@@ -77,10 +77,21 @@ end
 function util.joinUrl(base: string, path: string): string
   if string.match(path, '^https?://') or string.sub(path, 1, 1) == '#' then return path end
 
-  local stem = string.match(base, '^(.-)/*$') :: string
-  local rest = string.match(path, '^/*(.*)$') :: string
+  -- Measured and cut a slash at a time, so that a base or a path that is not text is refused
+  -- here, where a pattern or an interpolation would read a number as its digits.
+  local stem = base
+  while #stem > 0 and string.sub(stem, -1) == '/' do
+    stem = string.sub(stem, 1, -2)
+  end
 
-  return `{stem}/{rest}`
+  local rest = path
+  while #rest > 0 and string.sub(rest, 1, 1) == '/' do
+    rest = string.sub(rest, 2)
+  end
+
+  if rest == '' then return stem .. '/' end
+
+  return stem .. '/' .. rest
 end
 
 -- Every byte a slug does not keep, and what it becomes: an upper-case letter its lower-case one,
