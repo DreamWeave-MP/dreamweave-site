@@ -3,6 +3,7 @@
 -- What the site generator's modules share: text trimmed, escaped and slugged, URLs joined, globs
 -- matched against content paths, and files read, walked, written and copied below folders made
 -- as they are needed.
+local bytes = require '@dream/bytes'
 
 export type Entry = { path: string, relative: string }
 
@@ -82,15 +83,31 @@ function util.joinUrl(base: string, path: string): string
   return `{stem}/{rest}`
 end
 
+-- Every byte a slug does not keep, and what it becomes: an upper-case letter its lower-case one,
+-- anything else outside `[%w._~-]` a dash.
+local SlugFrom, SlugTo = (function(): (string, string)
+  local from, to = {}, {}
+
+  for byte = 0, 255 do
+    local character = string.char(byte)
+
+    if byte >= 65 and byte <= 90 then
+      table.insert(from, character)
+      table.insert(to, string.char(byte + 32))
+    elseif not string.match(character, '[%w%._~-]') then
+      table.insert(from, character)
+      table.insert(to, '-')
+    end
+  end
+
+  return table.concat(from), table.concat(to)
+end)()
+
+local SlugOptions = table.freeze { collapse = '-', trimStart = '-', trimEnd = '-' }
+
 --- `value` as a URL slug: lower case, every run of other characters one dash, none at the ends.
 function util.slugify(value: unknown): string
-  local slug = string.lower(tostring(value))
-  slug = string.gsub(slug, '[^%w%._~-]+', '-')
-  slug = string.gsub(slug, '%-+', '-')
-  slug = string.gsub(slug, '^%-+', '')
-  slug = string.gsub(slug, '%-+$', '')
-
-  return slug
+  return bytes.translate(tostring(value), SlugFrom, SlugTo, SlugOptions)
 end
 
 --- The text after the last dot of a path's file name, if it has one.
