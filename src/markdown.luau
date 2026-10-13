@@ -21,6 +21,11 @@ local markdown = {}
 
 local NoOptions: Options = table.freeze {}
 
+-- The bytes a block can start with. A line's kind is decided by the first byte that is not
+-- space, so each line is asked only the questions that byte allows.
+local Backtick, Tilde, Hash, Equals, Dash, Star, Underscore, Plus, Greater, Less =
+  96, 126, 35, 61, 45, 42, 95, 43, 62, 60
+
 --- The closing parenthesis of a link target that opens before `start`, counting the pairs inside.
 local function linkFinish(text: string, start: number): number?
   local depth = 0
@@ -72,23 +77,38 @@ local function splitHref(raw: string): (string, string?)
   return target, nil
 end
 
+-- The bytes inline syntax can start at.
+local Bang, Bracket, Backslash = 33, 91, 92
+
+local Special = table.freeze {
+  [Bang] = true,
+  [Bracket] = true,
+  [Backtick] = true,
+  [Star] = true,
+  [Underscore] = true,
+  [Tilde] = true,
+  [Less] = true,
+  [Backslash] = true,
+}
+
 local function inline(text: string, options: Options?): string
   local given = options or NoOptions
   local resolveLink = given.resolveLink
+  local length = #text
   local out = {}
   local at = 1
 
-  while at <= #text do
-    local two, character = string.sub(text, at, at + 1), string.sub(text, at, at)
+  while at <= length do
+    local byte, following = string.byte(text, at, at + 1)
 
-    if not string.find('![`*_~<\\', character, 1, true) then
-      local stop = string.find(text, '[!%[`*_~<\\]', at + 1) or #text + 1
+    if not Special[byte] then
+      local stop = string.find(text, '[!%[`*_~<\\]', at + 1) or length + 1
       table.insert(out, util.escapeHtml(string.sub(text, at, stop - 1)))
       at = stop
       continue
     end
 
-    if two == '![' then
+    if byte == Bang and following == Bracket then
       local close = string.find(text, '](', at + 2, true)
       local finish = if close then linkFinish(text, close + 2) else nil
 
@@ -104,7 +124,7 @@ local function inline(text: string, options: Options?): string
         at = finish + 1
         continue
       end
-    elseif character == '[' then
+    elseif byte == Bracket then
       local close = string.find(text, '](', at + 1, true)
       local finish = if close then linkFinish(text, close + 2) else nil
 
@@ -120,9 +140,9 @@ local function inline(text: string, options: Options?): string
         at = finish + 1
         continue
       end
-    elseif character == '`' then
+    elseif byte == Backtick then
       local run = 1
-      while string.sub(text, at + run, at + run) == '`' do
+      while string.byte(text, at + run) == Backtick do
         run += 1
       end
 
@@ -132,24 +152,24 @@ local function inline(text: string, options: Options?): string
         at = finish + run
         continue
       end
-    elseif two == '**' or two == '__' then
-      local finish = string.find(text, two, at + 2, true)
+    elseif byte == following and (byte == Star or byte == Underscore) then
+      local finish = string.find(text, if byte == Star then '**' else '__', at + 2, true)
       if finish then
         table.insert(out, `<strong>{inline(string.sub(text, at + 2, finish - 1), given)}</strong>`)
         at = finish + 2
         continue
       end
-    elseif two == '~~' then
+    elseif byte == Tilde and following == Tilde then
       local finish = string.find(text, '~~', at + 2, true)
       if finish then
         table.insert(out, `<del>{inline(string.sub(text, at + 2, finish - 1), given)}</del>`)
         at = finish + 2
         continue
       end
-    elseif character == '*' or character == '_' then
+    elseif byte == Star or byte == Underscore then
       -- An underscore opens emphasis wherever it stands, inside a word too; only where it closes
       -- is held to a word boundary, and when no underscore is at one, the next closes it.
-      local finish = if character == '_'
+      local finish = if byte == Underscore
         then underscoreClose(text, at + 1) or string.find(text, '_', at + 1, true)
         else string.find(text, '*', at + 1, true)
 
@@ -158,7 +178,7 @@ local function inline(text: string, options: Options?): string
         at = finish + 1
         continue
       end
-    elseif character == '<' then
+    elseif byte == Less then
       local finish = string.find(text, '>', at + 1, true)
       if finish then
         local raw = string.sub(text, at, finish)
@@ -173,7 +193,7 @@ local function inline(text: string, options: Options?): string
         at = finish + 1
         continue
       end
-    elseif character == '\\' and at < #text then
+    elseif byte == Backslash and at < length then
       local escaped = string.sub(text, at + 1, at + 1)
       if string.find('\\`*_{}[]()#+-.!<>', escaped, 1, true) then
         table.insert(out, util.escapeHtml(escaped))
@@ -182,7 +202,7 @@ local function inline(text: string, options: Options?): string
       end
     end
 
-    table.insert(out, util.escapeHtml(character))
+    table.insert(out, if byte == Less then '&lt;' else string.sub(text, at, at))
     at += 1
   end
 
@@ -272,11 +292,6 @@ local function slug(title: string, seen: { [string]: boolean }): string
   seen[unique] = true
   return unique
 end
-
--- The bytes a block can start with. A line's kind is decided by the first byte that is not
--- space, so each line is asked only the questions that byte allows.
-local Backtick, Tilde, Hash, Equals, Dash, Star, Underscore, Plus, Greater, Less =
-  96, 126, 35, 61, 45, 42, 95, 43, 62, 60
 
 --- The first byte of `line` that is not space, or 0 for a blank line.
 local function leadOf(line: string): number
