@@ -331,8 +331,8 @@ function Site:renderContent()
       expanded = string.gsub(expanded, '<!--%s*more%s*-->', '')
     end
 
-    local document = Markdown.renderDocument(expanded, options)
-    item.content, item.toc = document.html, document.toc
+    local {html, toc} = Markdown.renderDocument(expanded, options)
+    item.content, item.toc = html, toc
     if summarySource then item.summary = Markdown.renderDocument(summarySource, options).html end
 
     local words = countWords(expanded)

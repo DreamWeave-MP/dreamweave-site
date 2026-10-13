@@ -366,10 +366,11 @@ local function renderInto(engine, out: { string }, nodes, environment, blocks): 
       if signal then return signal end
     elseif kind == 'for' then
       local keys, values = iterPairs(Expr.unwrap(evalExpr(node.expr, environment)))
-      local length, names = #keys, node.names
+      local {names, body, otherwise} = node
+      local length = #keys
 
       if length == 0 then
-        local signal = renderInto(engine, out, node.otherwise, environment, blocks)
+        local signal = renderInto(engine, out, otherwise, environment, blocks)
         if signal then return signal end
       end
 
@@ -384,7 +385,7 @@ local function renderInto(engine, out: { string }, nodes, environment, blocks): 
 
         scope:set('loop', { index = index, index0 = index - 1, first = index == 1, last = index == length, length = length }, false)
 
-        local signal = renderInto(engine, out, node.body, scope, blocks)
+        local signal = renderInto(engine, out, body, scope, blocks)
         if signal == 'break' then break end
         if signal and signal ~= 'continue' then return signal end
       end
