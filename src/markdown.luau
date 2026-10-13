@@ -98,7 +98,6 @@ local NextSpecial = bytes.regex('[!\\[`*_~<\\\\]', { unicode = false })
 
 local function inline(text: string, options: Options?): string
   local given = options or NoOptions
-  local resolveLink = given.resolveLink
   local length = #text
   local out = {}
   local at = 1
@@ -123,6 +122,7 @@ local function inline(text: string, options: Options?): string
       if close and finish then
         local alternative = string.sub(text, at + 2, close - 1)
         local href, title = splitHref(string.sub(text, close + 2, finish - 1))
+        local resolveLink = given.resolveLink
         if resolveLink then href = resolveLink(href, true) or href end
 
         local tag = `<img src="{util.escapeAttribute(href)}" alt="{util.escapeAttribute(alternative)}"`
@@ -139,6 +139,7 @@ local function inline(text: string, options: Options?): string
       if close and finish then
         local label = string.sub(text, at + 1, close - 1)
         local href, title = splitHref(string.sub(text, close + 2, finish - 1))
+        local resolveLink = given.resolveLink
         if resolveLink then href = resolveLink(href, false) or href end
 
         local tag = `<a href="{util.escapeAttribute(href)}"`
