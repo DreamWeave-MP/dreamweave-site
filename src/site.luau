@@ -205,23 +205,90 @@ function Site:baseVars(item,isPage)
     local vars={config=self.config,lang=self.config.default_language,current_url=item and item.permalink or self.config.base_url}
     vars.page=isPage and item or false;vars.section=(not isPage) and item or false;return vars
 end
-function Site:shortcodes(text,item,isPage)
-    local vars=self:baseVars(item,isPage);local env=Tera.Env.new(self.engine,vars)
-    local function renderOne(name,argText,body)
-        local args=parseShortArgs(argText or '',env);for k,v in pairs(vars) do if args[k]==nil then args[k]=v end end;if body~=nil then args.body=body end
-        return self.engine:render('shortcodes/'..name..'.html',args)
+-- A call written in a page's text: `{{ name(arguments) }}` alone, or `{% name(arguments) %}`
+-- opening a body that `{% end %}` closes.
+local InlineShortcode = '{{%s*([%w_]+)%s*%((.-)%)%s*}}'
+local BlockShortcode = '{%%%s*([%w_]+)%s*%((.-)%)%s*%%}'
+local BlockEnd = '{%%%s*end%s*%%}'
+
+--- Whether a `{` stands in the run of name characters, spaces and braces that ends just before
+--- `stop`, looked for no further back than `start`. Once the text from `stop` on has changed,
+--- that run is the only place before it where an inline shortcode could have come to start.
+local function opensBefore(text: string, start: number, stop: number): boolean
+  for index = stop - 1, start, -1 do
+    local byte = string.byte(text, index)
+    if byte == 123 then return true end
+
+    local named = (byte >= 48 and byte <= 57) or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) or byte == 95
+    if not named and byte ~= 32 and (byte < 9 or byte > 13) then return false end
+  end
+
+  return false
+end
+
+--- `text` with its shortcodes rendered through their templates for `item`: at most 200 block
+--- shortcodes first, then at most 500 inline ones, what each renders to read again for more.
+function Site:shortcodes(text: string, item, isPage: boolean): string
+  local vars = self:baseVars(item, isPage)
+  local environment = Tera.Env.new(self.engine, vars)
+
+  local function renderOne(name: string, argumentText: string?, body: string?): string
+    local arguments = parseShortArgs(argumentText or '', environment)
+    for key, value in pairs(vars) do
+      if arguments[key] == nil then arguments[key] = value end
     end
-    -- block shortcodes first
-    local guard=0
-    while guard<200 do guard+=1;local s,e,name,args=string.find(text,'{%%%s*([%w_]+)%s*%((.-)%)%s*%%}',1)
-        if not s then break end
-        local es,ee=string.find(text,'{%%%s*end%s*%%}',e+1);if not es then break end
-        local body=string.sub(text,e+1,es-1);text=string.sub(text,1,s-1)..renderOne(name,args,body)..string.sub(text,ee+1)
+
+    if body then arguments.body = body end
+
+    return self.engine:render(`shortcodes/{name}.html`, arguments)
+  end
+
+  -- Neither kind can be found in text without its opening braces, and most pages have none.
+  if string.find(text, '{%', 1, true) then
+    for _ = 1, 200 do
+      local first, last, name, arguments = string.find(text, BlockShortcode, 1)
+      if not first then break end
+
+      local endFirst, endLast = string.find(text, BlockEnd, last + 1)
+      if not endFirst then break end
+
+      local body = string.sub(text, last + 1, endFirst - 1)
+      text = string.sub(text, 1, first - 1) .. renderOne(name, arguments, body) .. string.sub(text, endLast + 1)
     end
-    -- inline shortcodes, one pass repeatedly to allow rendered text around them
-    guard=0
-    while guard<500 do guard+=1;local s,e,name,args=string.find(text,'{{%s*([%w_]+)%s*%((.-)%)%s*}}',1);if not s then break end;text=string.sub(text,1,s-1)..renderOne(name,args,nil)..string.sub(text,e+1) end
-    return text
+  end
+
+  if not string.find(text, '{{', 1, true) then return text end
+
+  -- Each inline shortcode is replaced by what it renders to and the text is searched again from
+  -- its top, so that a shortcode a template wrote out, or one the rendered text completed, is
+  -- expanded too. A match can only start before the text just rendered where `opensBefore`
+  -- finds a brace, and inside it where it holds one; otherwise the next match is the next in
+  -- the text not yet read, and what lies before it is kept aside in `done`, not joined and
+  -- searched once more for every shortcode on the page.
+  local done = {}
+  local at = 1
+
+  for _ = 1, 500 do
+    local first, last, name, arguments = string.find(text, InlineShortcode, at)
+    if not first then break end
+
+    local rendered = renderOne(name, arguments, nil)
+
+    if string.find(rendered, '{', 1, true) or opensBefore(text, at, first) then
+      text = table.concat(done) .. string.sub(text, at, first - 1) .. rendered .. string.sub(text, last + 1)
+      table.clear(done)
+      at = 1
+    else
+      table.insert(done, string.sub(text, at, first - 1))
+      table.insert(done, rendered)
+      at = last + 1
+    end
+  end
+
+  if at == 1 then return text end
+
+  table.insert(done, string.sub(text, at))
+  return table.concat(done)
 end
 function Site:resolveContentLink(href)
     if string.sub(href,1,2)=='@/' then local fragment=string.match(href,'(#.*)$') or '';local key=norm(string.gsub(href,'#.*$',''));local item=self.pagesBySource[key] or self.sectionsBySource[key];if item then return item.permalink..fragment end end
