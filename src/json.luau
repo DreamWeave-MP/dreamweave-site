@@ -3,6 +3,7 @@
 -- Deterministic JSON output for generated AsHyAmS data. Jess deliberately ships a decoder only;
 -- this writer keeps site output in Luau and preserves the one distinction ordinary Luau tables
 -- cannot express by themselves: an empty object versus an empty array.
+local bytes = require '@dream/bytes'
 local jessJson = require '@jess/json'
 
 local json = {}
@@ -66,20 +67,26 @@ local Escapes: { [number]: string } = table.freeze {
   [92] = '\\\\',
 }
 
+-- The bytes a JSON string cannot hold as they are: the controls, the quote and the backslash.
+local Escaped = bytes.regex('[\\x00-\\x1f"\\\\]', { unicode = false })
+
 local function quote(text: string): string
+  -- `find` counts from zero: the offset it answers with is one less than the byte's index, and
+  -- that index is the offset to search on from.
+  local found = Escaped:find(text, 0)
+  if not found then return `"{text}"` end
+
   local out = { '"' }
   local start = 1
 
-  for index = 1, #text do
+  while found do
+    local index = found + 1
     local byte = string.byte(text, index)
-    local escaped = Escapes[byte]
-    if not escaped and byte < 32 then escaped = string.format('\\u%04x', byte) end
-    if not escaped then continue end
-
     if index > start then table.insert(out, string.sub(text, start, index - 1)) end
 
-    table.insert(out, escaped)
+    table.insert(out, Escapes[byte] or string.format('\\u%04x', byte))
     start = index + 1
+    found = Escaped:find(text, index)
   end
 
   if start <= #text then table.insert(out, string.sub(text, start)) end
