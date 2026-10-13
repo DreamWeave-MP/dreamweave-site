@@ -8,9 +8,13 @@ export type Entry = { path: string, relative: string }
 
 local util = {}
 
---- `text` without the whitespace at its ends.
+--- `text` without the whitespace at its ends. Text that starts and ends on a byte above the
+--- space is handed back as it is, which is most of what a document's lines are.
 function util.trim(text: string): string
-  return (string.gsub(string.gsub(text, '^%s+', ''), '%s+$', ''))
+  local first, last = string.byte(text, 1), string.byte(text, -1)
+  if first and first > 32 and last > 32 and type(text) == 'string' then return text end
+
+  return string.match(text, '^%s*(.*%S)') or ''
 end
 
 --- `value` as text with the five characters HTML reserves spelled as entities.
