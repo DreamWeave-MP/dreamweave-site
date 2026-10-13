@@ -2,6 +2,7 @@
 --!native
 -- The Markdown the site's pages are written in, rendered to the HTML Zola made of it: inline
 -- spans, and a document's blocks with the table of contents its headings give.
+local bytes = require '@dream/bytes'
 local util = require './util'
 
 export type TocEntry = { level: number, id: string, title: string, permalink: string }
@@ -91,6 +92,10 @@ local Special = table.freeze {
   [Backslash] = true,
 }
 
+-- The same bytes as one search: `@dream/bytes` finds the next of them several times faster than
+-- a pattern's character class does, over the plain text that lies between them.
+local NextSpecial = bytes.regex('[!\\[`*_~<\\\\]', { unicode = false })
+
 local function inline(text: string, options: Options?): string
   local given = options or NoOptions
   local resolveLink = given.resolveLink
@@ -102,7 +107,10 @@ local function inline(text: string, options: Options?): string
     local byte, following = string.byte(text, at, at + 1)
 
     if not Special[byte] then
-      local stop = string.find(text, '[!%[`*_~<\\]', at + 1) or length + 1
+      -- `find` counts from zero: offset `at` is the byte after this one, and the offset it
+      -- answers with is one less than that byte's index.
+      local found = NextSpecial:find(text, at)
+      local stop = if found then found + 1 else length + 1
       table.insert(out, util.escapeHtml(string.sub(text, at, stop - 1)))
       at = stop
       continue
