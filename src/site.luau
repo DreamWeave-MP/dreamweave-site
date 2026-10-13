@@ -294,19 +294,53 @@ function Site:resolveContentLink(href)
     if string.sub(href,1,2)=='@/' then local fragment=string.match(href,'(#.*)$') or '';local key=norm(string.gsub(href,'#.*$',''));local item=self.pagesBySource[key] or self.sectionsBySource[key];if item then return item.permalink..fragment end end
     return href
 end
+local WordSqueeze = table.freeze { collapse = ' ', trimStart = ' ', trimEnd = ' ' }
+
+--- How many runs of characters that are not whitespace `text` holds outside its tags.
+local function countWords(text: string): number
+  local words = Bytes.translate((string.gsub(text, '<[^>]->', ' ')), '\t\n\v\f\r', '     ', WordSqueeze)
+  if words == '' then return 0 end
+
+  return Bytes.count(words, ' ') + 1
+end
+
+--- Renders every item's Markdown: its shortcodes expanded, then its content, its table of
+--- contents, its summary when it has a fold, and its word count.
 function Site:renderContent()
-    local function render(item,isPage)
-        local expanded=self:shortcodes(item.raw,item,isPage)
-        local marker=string.find(expanded,'<!-- more -->',1,true)
-        local summarySource=marker and string.sub(expanded,1,marker-1) or nil
-        expanded=string.gsub(expanded,'<!--%s*more%s*-->','')
-        local opts={insertAnchorLinks=self.config.markdown.insert_anchor_links,resolveLink=function(h)return self:resolveContentLink(h) end}
-        local doc=Markdown.renderDocument(expanded,opts)
-        item.content=doc.html;item.toc=doc.toc
-        if summarySource then item.summary=Markdown.renderDocument(summarySource,opts).html end
-        local words=0;for _ in string.gmatch(string.gsub(expanded,'<[^>]->',' '),'%S+') do words+=1 end;item.word_count=words;item.reading_time=math.max(1,math.ceil(words/200))
+  local options = {
+    insertAnchorLinks = self.config.markdown.insert_anchor_links,
+    resolveLink = function(href: string): string return self:resolveContentLink(href) end,
+  }
+
+  local function render(item, isPage: boolean)
+    local expanded = self:shortcodes(item.raw, item, isPage)
+    local marker = string.find(expanded, '<!-- more -->', 1, true)
+    local summarySource = if marker then string.sub(expanded, 1, marker - 1) else nil
+
+    -- In this pattern only two of the dashes are dashes. It matches `<`, any number of `!`, one
+    -- `-`, `more` with space around it, any number of `-` and `>`: not the `<!-- more -->` that
+    -- marks the fold, which stays in the text. A match starts `<-` or `<!`, so text with neither
+    -- is not searched.
+    if string.find(expanded, '<-', 1, true) or string.find(expanded, '<!', 1, true) then
+      expanded = string.gsub(expanded, '<!--%s*more%s*-->', '')
     end
-    for _,s in ipairs(self.sections) do render(s,false) end;for _,p in ipairs(self.pages) do render(p,true) end
+
+    local document = Markdown.renderDocument(expanded, options)
+    item.content, item.toc = document.html, document.toc
+    if summarySource then item.summary = Markdown.renderDocument(summarySource, options).html end
+
+    local words = countWords(expanded)
+    item.word_count = words
+    item.reading_time = math.max(1, math.ceil(words / 200))
+  end
+
+  for _, section in ipairs(self.sections) do
+    render(section, false)
+  end
+
+  for _, page in ipairs(self.pages) do
+    render(page, true)
+  end
 end
 
 function Site:pageTemplate(page)
