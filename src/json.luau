@@ -181,15 +181,18 @@ local function scalar(value: unknown): string?
   return nil
 end
 
-local function encodeCompact(value: unknown, stack: { [unknown]: boolean }): string
+--- Appends `value` on one line, with no space in it, to `out`.
+local function writeCompact(out: { string }, value: unknown, stack: { [unknown]: boolean })
   local written = scalar(value)
-  if written then return written end
+  if written then
+    table.insert(out, written)
+    return
+  end
 
   local container = value :: { [unknown]: unknown }
   if stack[container] then error('JSON cannot encode a cyclic table', 0) end
 
   stack[container] = true
-  local out = {}
 
   if isArray(container) then
     table.insert(out, '[')
@@ -197,7 +200,7 @@ local function encodeCompact(value: unknown, stack: { [unknown]: boolean }): str
     for index = 1, #container do
       if index > 1 then table.insert(out, ',') end
 
-      table.insert(out, encodeCompact(container[index], stack))
+      writeCompact(out, container[index], stack)
     end
 
     table.insert(out, ']')
@@ -210,76 +213,97 @@ local function encodeCompact(value: unknown, stack: { [unknown]: boolean }): str
 
       table.insert(out, quote(key))
       table.insert(out, ':')
-      table.insert(out, encodeCompact(container[key], stack))
+      writeCompact(out, container[key], stack)
     end
 
     table.insert(out, '}')
   end
 
   stack[container] = nil
-  return table.concat(out)
 end
 
-local function spaces(count: number): string return string.rep(' ', count) end
+-- The indentation of each depth, made the first time something is written that deep.
+local Indents: { [number]: string } = {}
 
-local function encodePretty(value: unknown, depth: number, stack: { [unknown]: boolean }): string
+local function indent(depth: number): string
+  local known = Indents[depth]
+  if known then return known end
+
+  local made = string.rep(' ', depth * 2)
+  Indents[depth] = made
+
+  return made
+end
+
+--- Appends `value` to `out`, a line to each element and member, indented two spaces a level
+--- from `depth`.
+local function writePretty(out: { string }, value: unknown, depth: number, stack: { [unknown]: boolean })
   local written = scalar(value)
-  if written then return written end
+  if written then
+    table.insert(out, written)
+    return
+  end
 
   local container = value :: { [unknown]: unknown }
   if stack[container] then error('JSON cannot encode a cyclic table', 0) end
 
   stack[container] = true
-  local out = {}
 
   if isArray(container) then
     local count = #container
+
     if count == 0 then
-      stack[container] = nil
-      return '[]'
+      table.insert(out, '[]')
+    else
+      table.insert(out, '[\n')
+
+      for index = 1, count do
+        table.insert(out, indent(depth + 1))
+        writePretty(out, container[index], depth + 1, stack)
+        table.insert(out, if index < count then ',\n' else '\n')
+      end
+
+      table.insert(out, indent(depth))
+      table.insert(out, ']')
     end
-
-    table.insert(out, '[\n')
-
-    for index = 1, count do
-      table.insert(out, spaces((depth + 1) * 2))
-      table.insert(out, encodePretty(container[index], depth + 1, stack))
-      table.insert(out, if index < count then ',\n' else '\n')
-    end
-
-    table.insert(out, spaces(depth * 2))
-    table.insert(out, ']')
   else
     local keys = objectKeys(container)
-    if #keys == 0 then
-      stack[container] = nil
-      return '{}'
+    local count = #keys
+
+    if count == 0 then
+      table.insert(out, '{}')
+    else
+      table.insert(out, '{\n')
+
+      for index, key in ipairs(keys) do
+        table.insert(out, indent(depth + 1))
+        table.insert(out, quote(key))
+        table.insert(out, ': ')
+        writePretty(out, container[key], depth + 1, stack)
+        table.insert(out, if index < count then ',\n' else '\n')
+      end
+
+      table.insert(out, indent(depth))
+      table.insert(out, '}')
     end
-
-    table.insert(out, '{\n')
-
-    for index, key in ipairs(keys) do
-      table.insert(out, spaces((depth + 1) * 2))
-      table.insert(out, quote(key))
-      table.insert(out, ': ')
-      table.insert(out, encodePretty(container[key], depth + 1, stack))
-      table.insert(out, if index < #keys then ',\n' else '\n')
-    end
-
-    table.insert(out, spaces(depth * 2))
-    table.insert(out, '}')
   end
 
   stack[container] = nil
-  return table.concat(out)
 end
 
 --- `value` as JSON: indented by two spaces with a newline at the end, or on one line with no
 --- space in it when `pretty` is false.
 function json.encode(value: unknown, pretty: boolean?): string
-  if pretty == false then return encodeCompact(value, {}) end
+  local out = {}
 
-  return `{encodePretty(value, 0, {})}\n`
+  if pretty == false then
+    writeCompact(out, value, {})
+  else
+    writePretty(out, value, 0, {})
+    table.insert(out, '\n')
+  end
+
+  return table.concat(out)
 end
 
 return json
