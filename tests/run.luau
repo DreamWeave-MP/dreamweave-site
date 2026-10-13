@@ -623,6 +623,65 @@ suite.describe('site', function()
     expect([for page in loaded:feedPages() => page.relative_path]).toEqual { 'news/two.md', 'guide/second.md', 'guide/first.md', 'news/one.md' }
   end)
 
+  suite.it('expands shortcodes, blocks first, and what a shortcode renders to again', function()
+    local loaded = site.load(smallSite {
+      ['templates/shortcodes/echo.html'] = '<{{ value }}>',
+      ['templates/shortcodes/wrap.html'] = '{{ open | safe }} echo(value="nested") {{ close | safe }}',
+      ['templates/shortcodes/tail.html'] = '(value="straddled") }}',
+      ['templates/shortcodes/brace.html'] = '{ plain {{ value }} }',
+      ['templates/shortcodes/box.html'] = '[{{ title }}:{{ body | safe }}]',
+      ['templates/shortcodes/who.html'] = '{{ page.title }}/{{ section }}',
+    })
+
+    local page = loaded.pages[1]
+    local function expand(text: string): string return loaded:shortcodes(text, page, true) end
+
+    expect(expand 'a {{ echo(value="x") }} b {{echo(value=2)}} c').toBe 'a <x> b <2> c'
+    expect(expand '{{ echo(value=1) }}{{ echo(value=2) }}').toBe '<1><2>'
+    expect(expand 'pre_{{ echo(value=1) }}_post{{ echo(value=2) }}\n').toBe 'pre_<1>_post<2>\n'
+    expect(expand '{{ wrap(open="{" ~ "{", close="}" ~ "}") }} after').toBe '<nested> after'
+    expect(expand '{{ echo{{ tail() }} after').toBe '<straddled> after'
+    expect(expand 'x {{ brace(value=1) }} y {{ echo(value="z") }}').toBe 'x { plain 1 } y <z>'
+    expect(expand 'x { {{ echo(value=1) }} {').toBe 'x { <1> {'
+    expect(expand '{{ echo(value="a)") }} {{ echo(value="(b, c)") }}').toBe '<a)> <(b, c)>'
+    expect(expand '{{ who() }}').toBe 'Page/false'
+    expect(loaded:shortcodes('{{ echo(value=page) }}', loaded.sections[1], false)).toBe '<false>'
+    expect(expand 'plain { text } {{ not a call }} {% nor this %} {{').toBe 'plain { text } {{ not a call }} {% nor this %} {{'
+    expect(expand '').toBe ''
+
+    expect(expand '{% box(title="T") %}inner {{ echo(value="in") }} text{% end %} after').toBe '[T:inner <in> text] after'
+    expect(expand '{% box(title="A") %}a{% end %}{% box(title="B") %}b{%end%}').toBe '[A:a][B:b]'
+    expect(expand '{% box(title="T") %} never closed {{ echo(value=1) }}').toBe '{% box(title="T") %} never closed <1>'
+
+    local call = '{{ echo(value=1) }}'
+    expect(expand(string.rep(call, 501))).toBe(string.rep('<1>', 500) .. call)
+    expect(expand(string.rep('{% box(title="T") %}b{% end %}', 201))).toBe(string.rep('[T:b]', 200) .. '{% box(title="T") %}b{% end %}')
+  end)
+
+  suite.it('counts an item\'s words outside its markup, and cuts its summary at the fold', function()
+    local root = smallSite {
+      ['content/page.md'] = '+++\ntitle = "Page"\n+++\n\none <b>two</b>three\tfour\n\n<!--   more\t-->\n\nfive<br>six <unclosed seven\n',
+      ['content/other.md'] = 'Before the fold.\n\n<!-- more -->\n\nAfter <!--more--> it, and <!-- more --> again.\n',
+      ['content/empty.md'] = '+++\n\n+++\n',
+      ['content/odd.md'] = 'a <!-more-> b <-  more  --> c <!!-more> d <!-- more --> e\n',
+    }
+
+    local loaded = site.load(root)
+    local page, other, empty = loaded.pagesBySource['page.md'], loaded.pagesBySource['other.md'], loaded.pagesBySource['empty.md']
+    expect({ page.word_count, page.reading_time, page.summary }).toEqual { 8, 1, '' }
+
+    -- The marker that is taken out of the text is not the one that cuts the summary: a comment
+    -- with two dashes at each end stays where it was written.
+    expect(page.content).toBe '<p>one <b>two</b>three\tfour</p>\n<!--   more\t-->\n<p>five<br>six &lt;unclosed seven</p>\n'
+    expect({ other.word_count, other.summary }).toEqual { 7, '<p>Before the fold.</p>\n' }
+    expect(other.content).toBe '<p>Before the fold.</p>\n<!-- more -->\n<p>After <!--more--> it, and <!-- more --> again.</p>\n'
+    expect({ empty.word_count, empty.reading_time, empty.content }).toEqual { 0, 1, '' }
+
+    local odd = loaded.pagesBySource['odd.md']
+    expect({ odd.word_count, odd.summary }).toEqual { 5, '<p>a <!-more-> b <-  more  --> c <!!-more> d </p>\n' }
+    expect(odd.content).toBe '<p>a  b  c  d <!-- more --> e</p>\n'
+  end)
+
   suite.it('keeps a search body to prose: no markup, scripts, styles or code, entities read back', function()
     local loaded = site.load(smallSite {})
     loaded.config.search = {}
