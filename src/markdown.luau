@@ -301,10 +301,14 @@ local function slug(title: string, seen: { [string]: boolean }): string
   return unique
 end
 
---- The first byte of `line` that is not space, or 0 for a blank line.
+-- What a line with nothing but space on it leads with: no byte at all, since a line can start
+-- with any byte, the NUL one too.
+local Blank = -1
+
+--- The first byte of `line` that is not space, or `Blank`.
 local function leadOf(line: string): number
   local start = string.find(line, '%S')
-  return if start then string.byte(line, start) else 0
+  return if start then string.byte(line, start) else Blank
 end
 
 local function leadsRule(lead: number): boolean return lead == Dash or lead == Star or lead == Underscore end
@@ -334,7 +338,7 @@ function markdown.renderDocument(text: string, options: Options?): Document
 
   while index <= count do
     local line, lead = lines[index], leads[index]
-    if lead == 0 then
+    if lead == Blank then
       index += 1
       continue
     end
@@ -387,7 +391,7 @@ function markdown.renderDocument(text: string, options: Options?): Document
       continue
     end
 
-    local underLead = if index < count then leads[index + 1] else 0
+    local underLead = if index < count then leads[index + 1] else Blank
     if underLead == Equals or underLead == Dash then
       local under = util.trim(lines[index + 1])
 
@@ -443,7 +447,7 @@ function markdown.renderDocument(text: string, options: Options?): Document
       local first = index
       index += 1
 
-      while index <= count and leads[index] ~= 0 do
+      while index <= count and leads[index] ~= Blank do
         index += 1
       end
 
@@ -460,7 +464,7 @@ function markdown.renderDocument(text: string, options: Options?): Document
       table.insert(out, '</tr></thead><tbody>')
       index += 2
 
-      while index <= count and leads[index] ~= 0 and string.find(lines[index], '|', 1, true) do
+      while index <= count and leads[index] ~= Blank and string.find(lines[index], '|', 1, true) do
         table.insert(out, '<tr>')
         for _, cell in cells(lines[index]) do
           table.insert(out, `<td>{inline(cell, given)}</td>`)
@@ -477,7 +481,7 @@ function markdown.renderDocument(text: string, options: Options?): Document
     local first = index
     index += 1
 
-    while index <= count and leads[index] ~= 0 and not startsBlock(lines[index], leads[index]) do
+    while index <= count and leads[index] ~= Blank and not startsBlock(lines[index], leads[index]) do
       index += 1
     end
 
