@@ -303,10 +303,15 @@ local function iterPairs(v)
     return rows
 end
 
-local function evalExpr(text,env)
-    local ok,value=pcall(function() return Expr.eval(text,env) end)
-    if not ok then error('template expression ['..tostring(text)..']: '..tostring(value),0) end
-    return value
+--- What the expression `text` is worth in `environment`.
+local function evalExpr(text: string, environment)
+  -- An expression raises on text it cannot read, on a filter, a test or a function it does not
+  -- have, and on whatever a function a site registered raises. The error is raised again here
+  -- with the expression it came from, which is all a template's author has to find it by.
+  local evaluated, value = pcall(Expr.eval, text, environment)
+  if not evaluated then error(`template expression [{text}]: {value}`, 0) end
+
+  return value
 end
 
 function Engine:renderNodes(nodes,env,blocks)
