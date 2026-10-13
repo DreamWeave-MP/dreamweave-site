@@ -146,6 +146,23 @@ suite.describe('util', function()
     expect(util.pathExtension 'none').toBeNil()
   end)
 
+  suite.it('refuses to join a base or a path that is not text, and trims a number as its digits', function()
+    local number, nothing = (5 :: unknown) :: string, (nil :: unknown) :: string
+    expect(function() util.joinUrl(number, 'x') end).toThrow 'attempt to get length of a number value'
+    expect(function() util.joinUrl('x', number) end).toThrow 'attempt to get length of a number value'
+    expect(function() util.joinUrl(nothing, 'x') end).toThrow 'attempt to get length of a nil value'
+    expect(function() util.joinUrl('x', nothing) end).toThrow "invalid argument #1 to 'match' (string expected, got nil)"
+    expect(util.joinUrl('', '')).toBe '/'
+    expect(util.joinUrl('///', '///')).toBe '/'
+    expect(util.joinUrl('a\n/', '/\nb')).toBe 'a\n/\nb'
+    expect(util.trim(number)).toBe '5'
+    expect(util.trim((1.5 :: unknown) :: string)).toBe '1.5'
+    expect(function() util.trim(nothing) end).toThrow "invalid argument #1 to 'gsub' (string expected, got nil)"
+    expect(util.trim '\0 a \0').toBe '\0 a \0'
+    expect(util.trim '\v\f\r a\1 \n').toBe 'a\1'
+    expect(util.trim 'a').toBe 'a'
+  end)
+
   suite.it('matches globs a segment at a time', function()
     expect(util.globMatch('a/b/c.md', '**/*.md')).toBe(true)
     expect(util.globMatch('c.md', '**/*.md')).toBe(true)
@@ -369,6 +386,21 @@ suite.describe('markdown', function()
     expect(markdown.render 'Title\n===\n\nSub\n---\n\n***\n').toBe '<h1 id="title">Title</h1>\n<h2 id="sub">Sub</h2>\n<hr>\n'
     expect(markdown.render '<div>\nraw *kept*\n</div>\n\npara  \nbreak').toBe '<div>\nraw *kept*\n</div>\n<p>para<br>\nbreak</p>\n'
     expect(markdown.render '####### seven\n').toBe '<p>####### seven</p>\n'
+  end)
+
+  suite.it('reads a line that starts with a NUL byte as text, not as a blank one', function()
+    expect(markdown.render '\0 lead\nnext\n\n\0\n\n- item\n\0 after\n').toBe '<p>\0 lead\nnext</p>\n<p>\0</p>\n<ul>\n<li>item</li>\n</ul>\n<p>\0 after</p>\n'
+    expect(markdown.render '<div>\n\0 inside\n</div>\n').toBe '<div>\n\0 inside\n</div>\n'
+    expect(markdown.render 'a | b\n--|--\n1 | 2\n\0 | 3\n').toBe '<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr><tr><td>\0</td><td>3</td></tr></tbody></table>\n'
+    expect(markdown.render ' \t\v\f\n\n').toBe ''
+  end)
+
+  suite.it('reads its options only where a heading or a link asks for one', function()
+    local wrong = (true :: unknown) :: markdown.Options
+    expect(markdown.inline('plain *text*', wrong)).toBe 'plain <em>text</em>'
+    expect(markdown.renderDocument('plain\n\n> quoted\n', wrong).html).toBe '<p>plain</p>\n<blockquote>\n<p>quoted</p>\n</blockquote>\n'
+    expect(function() markdown.inline('[a](b)', wrong) end).toThrow "attempt to index boolean with 'resolveLink'"
+    expect(function() markdown.renderDocument('# a', wrong) end).toThrow "attempt to index boolean with 'insertAnchorLinks'"
   end)
 end)
 
@@ -766,6 +798,27 @@ suite.describe('site', function()
   suite.it('refuses a search index format it does not write', function()
     local root = smallSite { ['config.toml'] = 'base_url = "https://small.test"\nbuild_search_index = true\n' }
     expect(function() site.build(root, `{root}/public`) end).toThrow 'site.jpk currently supports search.index_format = "fuse_json"; got elasticlunr_javascript'
+  end)
+
+  suite.it('refuses ignored content that is not a list, and ignores nothing for a table of names', function()
+    local base = 'base_url = "https://small.test"\n'
+    local text = smallSite { ['config.toml'] = `{base}ignored_content = "*.md"\n` }
+    local blank = smallSite { ['config.toml'] = `{base}ignored_content = ""\n` }
+    local named = smallSite { ['config.toml'] = `{base}[ignored_content]\nname = "*.md"\n` }
+    local listed = smallSite { ['config.toml'] = `{base}ignored_content = ["nothing", "p*.md"]\n` }
+    expect(function() site.load(text) end).toThrow "invalid argument #1 to 'ipairs' (table expected, got string)"
+    expect(function() site.load(blank) end).toThrow "invalid argument #1 to 'ipairs' (table expected, got string)"
+    expect(#site.load(named).pages).toBe(1)
+    expect(#site.load(listed).pages).toBe(0)
+  end)
+
+  suite.it('needs a base_url to give a taxonomy term its address', function()
+    local root = smallSite {
+      ['config.toml'] = 'title = "No base"\n',
+      ['content/page.md'] = '+++\ntitle = "Page"\n[taxonomies]\ntags = ["x"]\n+++\n\nPage body.\n',
+    }
+
+    expect(function() site.build(root, `{root}/public`) end).toThrow 'attempt to get length of a nil value'
   end)
 end)
 
