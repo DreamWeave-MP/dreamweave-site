@@ -273,55 +273,77 @@ local function slug(title: string, seen: { [string]: boolean }): string
   return unique
 end
 
---- Whether `line` ends a paragraph by starting a block of another kind.
-local function startsBlock(line: string): boolean
-  return fence(line) ~= nil
-    or heading(line) ~= nil
-    or rule(line)
-    or listItem(line) ~= nil
-    or string.match(line, '^%s*>') ~= nil
+-- The bytes a block can start with. A line's kind is decided by the first byte that is not
+-- space, so each line is asked only the questions that byte allows.
+local Backtick, Tilde, Hash, Equals, Dash, Star, Underscore, Plus, Greater, Less =
+  96, 126, 35, 61, 45, 42, 95, 43, 62, 60
+
+--- The first byte of `line` that is not space, or 0 for a blank line.
+local function leadOf(line: string): number
+  local start = string.find(line, '%S')
+  return if start then string.byte(line, start) else 0
+end
+
+local function leadsRule(lead: number): boolean return lead == Dash or lead == Star or lead == Underscore end
+
+local function leadsList(lead: number): boolean
+  return lead == Dash or lead == Plus or lead == Star or (lead >= 48 and lead <= 57)
+end
+
+--- Whether `line`, whose first byte that is not space is `lead`, ends a paragraph by starting a
+--- block of another kind.
+local function startsBlock(line: string, lead: number): boolean
+  if lead == Greater then return true end
+  if lead == Backtick or lead == Tilde then return fence(line) ~= nil end
+  if lead == Hash then return heading(line) ~= nil end
+
+  return (leadsRule(lead) and rule(line)) or (leadsList(lead) and listItem(line) ~= nil)
 end
 
 function markdown.renderDocument(text: string, options: Options?): Document
   local given = options or NoOptions
-  local normal = string.gsub(text, '\r\n?', '\n')
-  local lines = {}
-
-  for line in string.gmatch(`{normal}\n`, '(.-)\n') do
-    table.insert(lines, line)
-  end
-
+  local lines = string.split((string.gsub(text, '\r\n?', '\n')), '\n')
+  local leads = [for line in lines => leadOf(line)]
+  local count = #lines
   local out, toc = {}, {}
   local seen: { [string]: boolean } = {}
   local index = 1
 
-  while index <= #lines do
-    local line = lines[index]
-    if util.trim(line) == '' then
+  while index <= count do
+    local line, lead = lines[index], leads[index]
+    if lead == 0 then
       index += 1
       continue
     end
 
-    local marker, language = fence(line)
+    local marker, language
+    if lead == Backtick or lead == Tilde then
+      marker, language = fence(line)
+    end
+
     if marker then
       -- A marker is a run of backticks or of tildes, neither of which a pattern reads as magic.
       local closing = `^%s*{marker}`
-      local body = {}
-      index += 1
+      local first = index + 1
+      index = first
 
-      while index <= #lines and not string.match(lines[index], closing) do
-        table.insert(body, lines[index])
+      while index <= count and not (leads[index] == lead and string.match(lines[index], closing)) do
         index += 1
       end
 
-      if index <= #lines then index += 1 end
+      local body = lines[first:index - 1]
+      if index <= count then index += 1 end
 
       local class = if language ~= '' then ` class="language-{util.escapeAttribute(util.trim(language :: string))}"` else ''
       table.insert(out, `<pre><code{class}>{util.escapeHtml(table.concat(body, '\n'))}\n</code></pre>\n`)
       continue
     end
 
-    local level, title = heading(line)
+    local level, title
+    if lead == Hash then
+      level, title = heading(line)
+    end
+
     if level and title then
       local id = slug(title, seen)
       local htmlTitle = inline(title, given)
@@ -342,11 +364,12 @@ function markdown.renderDocument(text: string, options: Options?): Document
       continue
     end
 
-    if index < #lines then
+    local underLead = if index < count then leads[index + 1] else 0
+    if underLead == Equals or underLead == Dash then
       local under = util.trim(lines[index + 1])
 
       if string.match(under, '^=+$') or string.match(under, '^%-+$') then
-        local setextLevel = if string.sub(under, 1, 1) == '=' then 1 else 2
+        local setextLevel = if underLead == Equals then 1 else 2
         local id = slug(line, seen)
         table.insert(toc, { level = setextLevel, id = id, title = line, permalink = `#{id}` })
         table.insert(out, `<h{setextLevel} id="{id}">{inline(line, given)}</h{setextLevel}>\n`)
@@ -355,17 +378,21 @@ function markdown.renderDocument(text: string, options: Options?): Document
       end
     end
 
-    if rule(line) then
+    if leadsRule(lead) and rule(line) then
       table.insert(out, '<hr>\n')
       index += 1
       continue
     end
 
-    local kind, _, indent = listItem(line)
+    local kind, _, indent
+    if leadsList(lead) then
+      kind, _, indent = listItem(line)
+    end
+
     if kind then
       table.insert(out, `<{kind}>\n`)
 
-      while index <= #lines do
+      while index <= count and leadsList(leads[index]) do
         local itemKind, item, itemIndent = listItem(lines[index])
         if itemKind ~= kind or itemIndent ~= indent then break end
 
@@ -377,14 +404,11 @@ function markdown.renderDocument(text: string, options: Options?): Document
       continue
     end
 
-    if string.match(line, '^%s*>') then
+    if lead == Greater then
       local quoted = {}
 
-      while index <= #lines do
-        local inner = string.match(lines[index], '^%s*>%s?(.*)$')
-        if inner == nil then break end
-
-        table.insert(quoted, inner)
+      while index <= count and leads[index] == Greater do
+        table.insert(quoted, (string.match(lines[index], '^%s*>%s?(.*)$')))
         index += 1
       end
 
@@ -392,20 +416,19 @@ function markdown.renderDocument(text: string, options: Options?): Document
       continue
     end
 
-    if string.match(util.trim(line), '^<[%a!/][^>]*>') then
-      local raw = { line }
+    if lead == Less and string.match(util.trim(line), '^<[%a!/][^>]*>') then
+      local first = index
       index += 1
 
-      while index <= #lines and util.trim(lines[index]) ~= '' do
-        table.insert(raw, lines[index])
+      while index <= count and leads[index] ~= 0 do
         index += 1
       end
 
-      table.insert(out, `{table.concat(raw, '\n')}\n`)
+      table.insert(out, `{table.concat(lines, '\n', first, index - 1)}\n`)
       continue
     end
 
-    if index < #lines and string.find(line, '|', 1, true) and tableSeparator(lines[index + 1]) then
+    if index < count and string.find(line, '|', 1, true) and tableSeparator(lines[index + 1]) then
       table.insert(out, '<table><thead><tr>')
       for _, cell in cells(line) do
         table.insert(out, `<th>{inline(cell, given)}</th>`)
@@ -414,7 +437,7 @@ function markdown.renderDocument(text: string, options: Options?): Document
       table.insert(out, '</tr></thead><tbody>')
       index += 2
 
-      while index <= #lines and util.trim(lines[index]) ~= '' and string.find(lines[index], '|', 1, true) do
+      while index <= count and leads[index] ~= 0 and string.find(lines[index], '|', 1, true) do
         table.insert(out, '<tr>')
         for _, cell in cells(lines[index]) do
           table.insert(out, `<td>{inline(cell, given)}</td>`)
@@ -428,15 +451,14 @@ function markdown.renderDocument(text: string, options: Options?): Document
       continue
     end
 
-    local paragraph = { line }
+    local first = index
     index += 1
 
-    while index <= #lines and util.trim(lines[index]) ~= '' and not startsBlock(lines[index]) do
-      table.insert(paragraph, lines[index])
+    while index <= count and leads[index] ~= 0 and not startsBlock(lines[index], leads[index]) do
       index += 1
     end
 
-    local joined = string.gsub(table.concat(paragraph, '\n'), '  \n', '<br>\n')
+    local joined = string.gsub(table.concat(lines, '\n', first, index - 1), '  \n', '<br>\n')
     table.insert(out, `<p>{inline(joined, given)}</p>\n`)
   end
 
