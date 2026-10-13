@@ -623,6 +623,38 @@ suite.describe('site', function()
     expect([for page in loaded:feedPages() => page.relative_path]).toEqual { 'news/two.md', 'guide/second.md', 'guide/first.md', 'news/one.md' }
   end)
 
+  suite.it('keeps a search body to prose: no markup, scripts, styles or code, entities read back', function()
+    local loaded = site.load(smallSite {})
+    loaded.config.search = {}
+    loaded.pages[1].content = table.concat {
+      '<h1>Title</h1>\r\n',
+      '<SCRIPT type="x">var a = "<b>";\n</script>after script\n',
+      '<Style>\n.a { b: c }\n</STYLE><style>second</style>\n',
+      '  <p>one\ttwo \v three&amp;&lt;four&gt; &quot;five&quot; &#x27;six&#x27; &amp;lt;</p>  \n',
+      '\n \t \n',
+      '<pre><code>dropped\n</code></pre><PRE lang="x">also dropped</pre>\n',
+      '<pre>unclosed stays, <script>and this <style>too\n',
+      'a < b and c > d <unclosed\n',
+    }
+
+    local body = 'Title\nafter script\none two three&<four> "five" \'six\' &lt;\nunclosed stays, and this too\na d <unclosed'
+    expect(loaded:searchItems()[2].body).toBe(body)
+
+    loaded.config.search.truncate_content_length = 20
+    expect(loaded:searchItems()[2].body).toBe(string.sub(body, 1, 20))
+    loaded.config.search.truncate_content_length = #body
+    expect(loaded:searchItems()[2].body).toBe(body)
+
+    loaded.pages[1].content = ' \n\t\n'
+    expect(loaded:searchItems()[2].body).toBe ''
+    loaded.pages[1].content = nil
+    expect(loaded:searchItems()[2].body).toBe ''
+    loaded.pages[1].content = 'one line, no newline'
+    expect(loaded:searchItems()[2].body).toBe 'one line, no newline'
+    loaded.pages[1].content = '<pre>a</pre><pre>b</pre>c<script></script><pre>\n\n</pre>'
+    expect(loaded:searchItems()[2].body).toBe 'c'
+  end)
+
   suite.it('reads a site with no content, and zola.toml when there is no config.toml', function()
     local root = tree { ['zola.toml'] = 'base_url = "https://bare.test"\n' }
     local loaded = site.load(root)
