@@ -144,13 +144,17 @@ end
 local function splitSelectors(s)
     local out={};for x in string.gmatch(s..',','(.-),') do x=trim(x);if x~='' then table.insert(out,x) end end;return out
 end
-local function combineSelectors(parent,child)
-    local children=splitSelectors(child);if not parent or #parent==0 then return children end
-    local out={}
-    for _,p in ipairs(parent) do for _,c in ipairs(children) do
-        if string.find(c,'&',1,true) then table.insert(out,plainReplace(c,'&',p)) else table.insert(out,p..' '..c) end
-    end end
-    return out
+--- Every selector `child` lists under every selector of `parent`: after it and a space, or
+--- with the parent's own wherever the child's writes `&`.
+local function combineSelectors(parent: { string }?, child: string): { string }
+  local children = splitSelectors(child)
+  if not parent or #parent == 0 then return children end
+
+  return [
+    for outer in parent
+    for inner in children
+    => if string.find(inner, '&', 1, true) then plainReplace(inner, '&', outer) else `{outer} {inner}`
+  ]
 end
 
 local function property(text)
