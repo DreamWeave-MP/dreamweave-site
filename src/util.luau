@@ -1,153 +1,236 @@
+--!strict
 --!native
-local M = {}
+-- What the site generator's modules share: text trimmed, escaped and slugged, URLs joined, globs
+-- matched against content paths, and files read, walked, written and copied below folders made
+-- as they are needed.
 
-function M.trim(s)
-    return (string.gsub(string.gsub(s, '^%s+', ''), '%s+$', ''))
+export type Entry = { path: string, relative: string }
+
+local util = {}
+
+--- `text` without the whitespace at its ends.
+function util.trim(text: string): string
+  return (string.gsub(string.gsub(text, '^%s+', ''), '%s+$', ''))
 end
 
-function M.escapeHtml(s)
-    s = tostring(s)
-    s = string.gsub(s, '&', '&amp;')
-    s = string.gsub(s, '<', '&lt;')
-    s = string.gsub(s, '>', '&gt;')
-    s = string.gsub(s, '"', '&quot;')
-    s = string.gsub(s, "'", '&#x27;')
-    return s
+--- `value` as text with the five characters HTML reserves spelled as entities.
+function util.escapeHtml(value: unknown): string
+  local text = tostring(value)
+  text = string.gsub(text, '&', '&amp;')
+  text = string.gsub(text, '<', '&lt;')
+  text = string.gsub(text, '>', '&gt;')
+  text = string.gsub(text, '"', '&quot;')
+  text = string.gsub(text, "'", '&#x27;')
+
+  return text
 end
 
-function M.escapeAttribute(s) return M.escapeHtml(s) end
+function util.escapeAttribute(value: unknown): string return util.escapeHtml(value) end
 
-function M.copy(t)
-    local out = {}
-    for k,v in pairs(t or {}) do out[k]=v end
-    return out
+--- A shallow copy of every key `source` has; an empty table for none.
+function util.copy<Key, Value>(source: { [Key]: Value }?): { [Key]: Value }
+  local out = {}
+  for key, value in pairs(source or {}) do
+    out[key] = value
+  end
+
+  return out
 end
 
-function M.arrayCopy(t)
-    local out={}
-    for i,v in ipairs(t or {}) do out[i]=v end
-    return out
+--- A copy of `source` up to its first gap.
+function util.arrayCopy<Value>(source: { Value }?): { Value }
+  local out = {}
+  for index, value in ipairs(source or {}) do
+    out[index] = value
+  end
+
+  return out
 end
 
-function M.isArray(t)
-    if type(t) ~= 'table' then return false end
-    local n=0
-    for k,_ in pairs(t) do
-        if type(k) ~= 'number' or k < 1 or k % 1 ~= 0 then return false end
-        if k > n then n=k end
+--- Whether `value` is a table whose keys are exactly `1..n`.
+function util.isArray(value: unknown): boolean
+  if type(value) ~= 'table' then return false end
+
+  local length = 0
+  for key in pairs(value :: { [unknown]: unknown }) do
+    if type(key) ~= 'number' or key < 1 or key % 1 ~= 0 then return false end
+
+    if key > length then length = key end
+  end
+
+  for index = 1, length do
+    if rawget(value :: { unknown }, index) == nil then return false end
+  end
+
+  return true
+end
+
+--- `path` below `base`, with one slash between them. An absolute URL or a fragment is its own
+--- answer.
+function util.joinUrl(base: string, path: string): string
+  if string.match(path, '^https?://') or string.sub(path, 1, 1) == '#' then return path end
+
+  local stem = string.match(base, '^(.-)/*$') :: string
+  local rest = string.match(path, '^/*(.*)$') :: string
+
+  return `{stem}/{rest}`
+end
+
+--- `value` as a URL slug: lower case, every run of other characters one dash, none at the ends.
+function util.slugify(value: unknown): string
+  local slug = string.lower(tostring(value))
+  slug = string.gsub(slug, '[^%w%._~-]+', '-')
+  slug = string.gsub(slug, '%-+', '-')
+  slug = string.gsub(slug, '^%-+', '')
+  slug = string.gsub(slug, '%-+$', '')
+
+  return slug
+end
+
+--- The text after the last dot of a path's file name, if it has one.
+function util.pathExtension(path: string): string? return (string.match(path, '%.([^%./]+)$')) end
+
+--- A file's contents, or an error naming the file that is not there.
+function util.readRequired(path: string): string
+  local contents = jess.fs.read(path)
+  if contents == nil then error(`read {path}: file does not exist`, 0) end
+
+  return contents
+end
+
+--- Every file below `root`, folders walked in name order, appended to `files`: where it is, and
+--- its path relative to `root` (below `prefix`, when one is given) with forward slashes.
+function util.walk(root: string, files: { Entry }?, prefix: string?): { Entry }
+  local found: { Entry } = files or {}
+  local below = prefix or ''
+  if not jess.fs.isDir(root) then return found end
+
+  local names = jess.fs.list(root)
+  table.sort(names)
+
+  for _, name in names do
+    local path = jess.fs.join(root, name)
+    local relative = if below == '' then name else `{below}/{name}`
+
+    if jess.fs.isDir(path) then
+      util.walk(path, found, relative)
+    elseif jess.fs.isFile(path) then
+      table.insert(found, { path = path, relative = relative })
     end
-    for i=1,n do if rawget(t,i)==nil then return false end end
-    return true
+  end
+
+  return found
 end
 
-function M.joinUrl(base, path)
-    if string.match(path, '^https?://') or string.sub(path,1,1)=='#' then return path end
-    local b=base
-    while #b>0 and string.sub(b,-1)=='/' do b=string.sub(b,1,-2) end
-    local p=path
-    while #p>0 and string.sub(p,1,1)=='/' do p=string.sub(p,2) end
-    if p=='' then return b..'/' end
-    return b..'/'..p
+--- Makes the folder `path` is in, when it names one.
+function util.ensureParent(path: string)
+  local parent = jess.fs.parent(path)
+  if parent and parent ~= '' then jess.fs.createDir(parent) end
 end
 
-function M.slugify(value)
-    local s=string.lower(tostring(value))
-    s=string.gsub(s, '[^%w%._~-]+', '-')
-    s=string.gsub(s, '%-+', '-')
-    s=string.gsub(s, '^%-+', '')
-    s=string.gsub(s, '%-+$', '')
-    return s
+function util.write(path: string, data: string)
+  util.ensureParent(path)
+  return jess.fs.write(path, data)
 end
 
-function M.pathExtension(path)
-    return string.match(path, '%.([^%./]+)$')
+function util.copyFile(from: string, to: string)
+  util.ensureParent(to)
+  return jess.fs.copy(from, to)
 end
 
-function M.readRequired(path)
-    local s=jess.fs.read(path)
-    if s==nil then error(`read {path}: file does not exist`,0) end
-    return s
+--- Copies every file below `from` to the same place below `to`, and counts them.
+function util.copyTree(from: string, to: string): number
+  local entries = util.walk(from)
+  for _, entry in entries do
+    util.copyFile(entry.path, jess.fs.join(to, entry.relative))
+  end
+
+  return #entries
 end
 
-function M.walk(root, files, prefix)
-    files=files or {};prefix=prefix or ''
-    if not jess.fs.isDir(root) then return files end
-    local names=jess.fs.list(root);table.sort(names)
-    for _,name in ipairs(names) do
-        local path=jess.fs.join(root,name)
-        local rel=prefix=='' and name or prefix..'/'..name
-        if jess.fs.isDir(path) then M.walk(path,files,rel)
-        elseif jess.fs.isFile(path) then table.insert(files,{path=path,relative=rel}) end
+--- One glob segment as an anchored Lua pattern: `*` any run and `?` any one character, neither
+--- crossing a slash, and everything else itself.
+local function segmentPattern(segment: string): string
+  local out = { '^' }
+  for index = 1, #segment do
+    local character = string.sub(segment, index, index)
+
+    if character == '*' then
+      table.insert(out, '[^/]*')
+    elseif character == '?' then
+      table.insert(out, '[^/]')
+    elseif string.find('^$()%.[]+-', character, 1, true) then
+      table.insert(out, `%{character}`)
+    else
+      table.insert(out, character)
     end
-    return files
+  end
+
+  table.insert(out, '$')
+  return table.concat(out)
 end
 
+--- A path's segments: what lies before each slash of `path` with one appended.
+local function segments(path: string): { string }
+  local out = {}
+  for segment in string.gmatch(`{path}/`, '(.-)/') do
+    table.insert(out, segment)
+  end
 
-function M.ensureParent(path)
-    local parent=jess.fs.parent(path)
-    if parent and parent~='' then jess.fs.createDir(parent) end
+  return out
 end
 
-function M.write(path,data)
-    M.ensureParent(path)
-    return jess.fs.write(path,data)
-end
+--- Whether `path` matches `glob`, a segment at a time: `**` is any number of segments, and
+--- either may be written with backslashes or a leading `./`.
+function util.globMatch(path: string, glob: string): boolean
+  local pathSegments = segments((string.gsub(string.gsub(path, '\\', '/'), '^%./', '')))
+  local globSegments = segments((string.gsub(string.gsub(glob, '\\', '/'), '^%./', '')))
+  local pathCount, globCount = #pathSegments, #globSegments
+  local memo: { [string]: boolean } = {}
 
-function M.copyFile(from,to)
-    M.ensureParent(to)
-    return jess.fs.copy(from,to)
-end
+  local function matches(globIndex: number, pathIndex: number): boolean
+    local key = `{globIndex}:{pathIndex}`
+    local known = memo[key]
+    if known ~= nil then return known end
 
-function M.copyTree(from,to)
-    local count=0
-    for _,entry in ipairs(M.walk(from)) do
-        local dest=jess.fs.join(to,entry.relative)
-        M.copyFile(entry.path,dest);count+=1
+    local matched = false
+    if globIndex > globCount then
+      matched = pathIndex > pathCount
+    elseif globSegments[globIndex] == '**' then
+      matched = matches(globIndex + 1, pathIndex) or (pathIndex <= pathCount and matches(globIndex, pathIndex + 1))
+    elseif
+      pathIndex <= pathCount
+      and string.match(pathSegments[pathIndex], segmentPattern(globSegments[globIndex]))
+    then
+      matched = matches(globIndex + 1, pathIndex + 1)
     end
-    return count
+
+    memo[key] = matched
+    return matched
+  end
+
+  return matches(1, 1)
 end
 
-local function segmentPattern(seg)
-    local out={'^'}
-    for i=1,#seg do
-        local c=string.sub(seg,i,i)
-        if c=='*' then table.insert(out,'[^/]*')
-        elseif c=='?' then table.insert(out,'[^/]')
-        elseif string.find('^$()%.[]+-',c,1,true) then table.insert(out,'%'..c)
-        else table.insert(out,c) end
-    end
-    table.insert(out,'$');return table.concat(out)
+--- `text` cut at every `separator`, a comma unless one is given; its characters for an empty
+--- separator.
+function util.split(text: string, separator: string?): { string }
+  local cut = separator or ','
+  if cut == '' then return [for index in range(1, #text) => string.sub(text, index, index)] end
+
+  local out = {}
+  local at = 1
+
+  while true do
+    local first, last = string.find(text, cut, at, true)
+    if not first then break end
+
+    table.insert(out, string.sub(text, at, first - 1))
+    at = (last :: number) + 1
+  end
+
+  table.insert(out, string.sub(text, at))
+  return out
 end
 
-function M.globMatch(path,glob)
-    path=string.gsub(path,'\\','/');glob=string.gsub(glob,'\\','/')
-    path=string.gsub(path,'^%./','');glob=string.gsub(glob,'^%./','')
-    local ps,gs={},{}
-    for x in string.gmatch(path..'/','(.-)/') do table.insert(ps,x) end
-    for x in string.gmatch(glob..'/','(.-)/') do table.insert(gs,x) end
-    local memo={}
-    local function go(i,j)
-        local key=i..':'..j;if memo[key]~=nil then return memo[key] end
-        local ok=false
-        if i>#gs then ok=j>#ps
-        elseif gs[i]=='**' then ok=go(i+1,j) or (j<=#ps and go(i,j+1))
-        elseif j<=#ps and string.match(ps[j],segmentPattern(gs[i])) then ok=go(i+1,j+1) end
-        memo[key]=ok;return ok
-    end
-    return go(1,1)
-end
-
-function M.split(s, sep)
-    sep=sep or ','
-    local out={}
-    if sep=='' then for i=1,#s do out[i]=string.sub(s,i,i) end;return out end
-    local at=1
-    while true do
-        local i,j=string.find(s,sep,at,true)
-        if not i then table.insert(out,string.sub(s,at));break end
-        table.insert(out,string.sub(s,at,i-1));at=j+1
-    end
-    return out
-end
-
-return M
+return util
