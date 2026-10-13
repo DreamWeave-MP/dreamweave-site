@@ -36,21 +36,26 @@ local function resolveImport(currentRoot,name)
     return nil
 end
 
-local function loadExpanded(path,stack)
-    stack=stack or {}
-    if stack[path] then error('sass import cycle: '..path,0) end
-    stack[path]=true
-    local text=Util.readRequired(path);text=string.gsub(text,'\r\n?','\n')
-    local out={};local root=dirname(path)
-    for line in string.gmatch(text..'\n','(.-)\n') do
-        local imp=string.match(line,'^%s*@import%s+(.+)$')
-        if imp then
-            local p=resolveImport(root,imp)
-            if p then table.insert(out,loadExpanded(p,stack)) else table.insert(out,line) end
-        else table.insert(out,line) end
-    end
-    stack[path]=nil
-    return table.concat(out,'\n')
+--- A stylesheet's text with every `@import` of a Sass file replaced by that file's own text,
+--- expanded the same way. `stack` holds the files being expanded, so one that imports itself is
+--- caught.
+local function loadExpanded(path: string, stack: { [string]: boolean }?): string
+  local open = stack or {}
+  if open[path] then error(`sass import cycle: {path}`, 0) end
+
+  open[path] = true
+  local text = string.gsub(Util.readRequired(path), '\r\n?', '\n')
+  local root = dirname(path)
+  local out = {}
+
+  for _, line in string.split(text, '\n') do
+    local imported = string.match(line, '^%s*@import%s+(.+)$')
+    local resolved = if imported then resolveImport(root, imported) else nil
+    table.insert(out, if resolved then loadExpanded(resolved, open) else line)
+  end
+
+  open[path] = nil
+  return table.concat(out, '\n')
 end
 
 local function normalizeSelectorLines(lines)
@@ -72,20 +77,27 @@ local function normalizeSelectorLines(lines)
     return out
 end
 
-local function parseTree(text)
-    local raw={};for line in string.gmatch(text..'\n','(.-)\n') do table.insert(raw,line) end
-    raw=normalizeSelectorLines(raw)
-    local root={indent=-1,text='__root__',children={}}
-    local stack={root}
-    for _,line in ipairs(raw) do
-        local t=trim(line)
-        if t~='' and string.sub(t,1,2)~='//' then
-            local ind=indentOf(line);local node={indent=ind,text=t,children={}}
-            while #stack>1 and ind<=stack[#stack].indent do table.remove(stack) end
-            table.insert(stack[#stack].children,node);table.insert(stack,node)
-        end
+--- The source as a tree by indentation: each line that is not blank or a comment is a node
+--- under the nearest line above it that is indented less.
+local function parseTree(text: string)
+  local root = { indent = -1, text = '__root__', children = {} }
+  local stack = { root }
+
+  for _, line in normalizeSelectorLines(string.split(text, '\n')) do
+    local trimmed = trim(line)
+    if trimmed == '' or string.sub(trimmed, 1, 2) == '//' then continue end
+
+    local indent = indentOf(line)
+    local node = { indent = indent, text = trimmed, children = {} }
+    while #stack > 1 and indent <= stack[#stack].indent do
+      table.remove(stack)
     end
-    return root
+
+    table.insert(stack[#stack].children, node)
+    table.insert(stack, node)
+  end
+
+  return root
 end
 
 local function envNew(parent) return {parent=parent,values={}} end
