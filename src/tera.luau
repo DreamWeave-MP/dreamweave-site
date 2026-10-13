@@ -293,14 +293,39 @@ function Engine:prepare(nodes,env)
         if n.kind=='import' then env:set(n.as,self:namespace(n.path,env),false) end
     end
 end
-local function iterPairs(v)
-    if type(v)~='table' then return {} end
-    local array=true;local max=0;local count=0
-    for k in pairs(v) do if type(k)~='number' then array=false;break end;max=math.max(max,k);count+=1 end
-    local rows={}
-    if array and max==count then for i,x in ipairs(v) do table.insert(rows,{i,x}) end
-    else local keys={};for k in pairs(v) do table.insert(keys,k) end;table.sort(keys,function(a,b)return tostring(a)<tostring(b) end);for _,k in ipairs(keys) do table.insert(rows,{k,v[k]}) end end
-    return rows
+--- What a `for` tag walks: the keys and the values of `value`, in step. A table whose keys are
+--- numbers, as many as the greatest of them, is walked in order up to its first gap; any other
+--- by its keys sorted as text; anything that is not a table is empty.
+local function iterPairs(value): ({ unknown }, { unknown })
+  local keys, values = {}, {}
+  if type(value) ~= 'table' then return keys, values end
+
+  local array, greatest, count = true, 0, 0
+  for key in pairs(value) do
+    if type(key) ~= 'number' then
+      array = false
+      break
+    end
+
+    greatest = math.max(greatest, key)
+    count += 1
+  end
+
+  if array and greatest == count then
+    for index, item in ipairs(value) do
+      keys[index], values[index] = index, item
+    end
+
+    return keys, values
+  end
+
+  for key in pairs(value) do
+    table.insert(keys, key)
+  end
+
+  table.sort(keys, function(left, right) return tostring(left) < tostring(right) end)
+
+  return keys, [for key in keys => value[key]]
 end
 
 --- What the expression `text` is worth in `environment`.
@@ -314,38 +339,83 @@ local function evalExpr(text: string, environment)
   return value
 end
 
-function Engine:renderNodes(nodes,env,blocks)
-    local out={}
-    for _,n in ipairs(nodes) do
-        if n.kind=='text' then table.insert(out,n.value)
-        elseif n.kind=='expr' then table.insert(out,valueString(evalExpr(n.value,env),true))
-        elseif n.kind=='set' then env:set(n.name,evalExpr(n.expr,env),n.global)
-        elseif n.kind=='import' or n.kind=='macro' or n.kind=='extends' then
-        elseif n.kind=='include' then table.insert(out,self:renderTemplate(n.path,env,nil))
-        elseif n.kind=='if' then
-            local done=false
-            for _,b in ipairs(n.branches) do if Expr.truthy(evalExpr(b.expr,env)) then local s,signal=self:renderNodes(b.body,env,blocks);table.insert(out,s);if signal then return table.concat(out),signal end;done=true;break end end
-            if not done then local s,signal=self:renderNodes(n.otherwise,env,blocks);table.insert(out,s);if signal then return table.concat(out),signal end end
-        elseif n.kind=='for' then
-            local v=evalExpr(n.expr,env);local rows=iterPairs(Expr.unwrap(v));if #rows==0 then local s,signal=self:renderNodes(n.otherwise,env,blocks);table.insert(out,s);if signal then return table.concat(out),signal end
-            else
-                for idx,row in ipairs(rows) do
-                    local e=env:child();if #n.names==1 then e:set(n.names[1],row[2],false) else e:set(n.names[1],row[1],false);e:set(n.names[2],row[2],false) end
-                    e:set('loop',{index=idx,index0=idx-1,first=idx==1,last=idx==#rows,length=#rows},false)
-                    local s,signal=self:renderNodes(n.body,e,blocks);table.insert(out,s);if signal=='break' then break elseif signal~='continue' and signal then return table.concat(out),signal end
-                end
-            end
-        elseif n.kind=='block' then
-            local override=blocks and blocks[n.name]
-            if override and override~=n then
-                local e=env:child();e:set('super',callable(function() return safe(self:renderNodes(n.body,env:child(),blocks)) end),false)
-                local s,signal=self:renderNodes(override.body,e,blocks);table.insert(out,s);if signal then return table.concat(out),signal end
-            else local s,signal=self:renderNodes(n.body,env:child(),blocks);table.insert(out,s);if signal then return table.concat(out),signal end end
-        elseif n.kind=='break' then return table.concat(out),'break'
-        elseif n.kind=='continue' then return table.concat(out),'continue'
+--- Appends what `nodes` render to in `environment` to `out`, and answers `'break'` or
+--- `'continue'` when one of those tags stopped the nodes early.
+local function renderInto(engine, out: { string }, nodes, environment, blocks): string?
+  for _, node in ipairs(nodes) do
+    local kind = node.kind
+
+    if kind == 'text' then
+      table.insert(out, node.value)
+    elseif kind == 'expr' then
+      table.insert(out, valueString(evalExpr(node.value, environment), true))
+    elseif kind == 'set' then
+      environment:set(node.name, evalExpr(node.expr, environment), node.global)
+    elseif kind == 'include' then
+      table.insert(out, engine:renderTemplate(node.path, environment, nil))
+    elseif kind == 'if' then
+      local body = node.otherwise
+      for _, branch in ipairs(node.branches) do
+        if Expr.truthy(evalExpr(branch.expr, environment)) then
+          body = branch.body
+          break
         end
+      end
+
+      local signal = renderInto(engine, out, body, environment, blocks)
+      if signal then return signal end
+    elseif kind == 'for' then
+      local keys, values = iterPairs(Expr.unwrap(evalExpr(node.expr, environment)))
+      local length, names = #keys, node.names
+
+      if length == 0 then
+        local signal = renderInto(engine, out, node.otherwise, environment, blocks)
+        if signal then return signal end
+      end
+
+      for index = 1, length do
+        local scope = environment:child()
+        if #names == 1 then
+          scope:set(names[1], values[index], false)
+        else
+          scope:set(names[1], keys[index], false)
+          scope:set(names[2], values[index], false)
+        end
+
+        scope:set('loop', { index = index, index0 = index - 1, first = index == 1, last = index == length, length = length }, false)
+
+        local signal = renderInto(engine, out, node.body, scope, blocks)
+        if signal == 'break' then break end
+        if signal and signal ~= 'continue' then return signal end
+      end
+    elseif kind == 'block' then
+      local override = blocks and blocks[node.name]
+
+      if override and override ~= node then
+        local scope = environment:child()
+        scope:set('super', callable(function() return safe(engine:renderNodes(node.body, environment:child(), blocks)) end), false)
+
+        local signal = renderInto(engine, out, override.body, scope, blocks)
+        if signal then return signal end
+      else
+        local signal = renderInto(engine, out, node.body, environment:child(), blocks)
+        if signal then return signal end
+      end
+    elseif kind == 'break' or kind == 'continue' then
+      return kind
     end
-    return table.concat(out),nil
+  end
+
+  return nil
+end
+
+--- What `nodes` render to in `environment`, and `'break'` or `'continue'` when one of those tags
+--- stopped them early.
+function Engine:renderNodes(nodes, environment, blocks): (string, string?)
+  local out = {}
+  local signal = renderInto(self, out, nodes, environment, blocks)
+
+  return table.concat(out), signal
 end
 function Engine:renderTemplate(name,envOrVars,overrides)
     local ast=self:parse(name);local env
