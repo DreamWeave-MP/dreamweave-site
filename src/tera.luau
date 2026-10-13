@@ -127,19 +127,35 @@ function Env.new(engine,globals,parent)
     return setmetatable({engine=engine,globals=globals or {},locals={},parent=parent},Env)
 end
 function Env:child() return Env.new(self.engine,self.globals,self) end
-function Env:get(name)
-    local sep=string.find(name,'::',1,true)
-    if sep then
-        local ns=string.sub(name,1,sep-1);local member=string.sub(name,sep+2)
-        local base=self:get(ns)
-        if type(base)=='table' then local x=rawget(base,member);if x~=nil then return x end end
-        return UNDEF
-    end
-    local v=rawget(self.locals,name);if v~=nil then return v end
-    if self.parent then local p=self.parent:get(name);if p~=UNDEF then return p end end
-    v=rawget(self.globals,name);if v~=nil then return v end
-    v=self.engine.functions[name];if v then return v end
-    return UNDEF
+--- What a plain name is bound to in `environment`: its own local, or what its parent answers,
+--- or its global, or one of the engine's functions. A name a parent leaves undefined is still
+--- looked for among this environment's globals and functions.
+local function lookup(environment, name: string)
+  local value = rawget(environment.locals, name)
+  if value ~= nil then return value end
+
+  local parent = environment.parent
+  if parent then
+    local inherited = lookup(parent, name)
+    if inherited ~= UNDEF then return inherited end
+  end
+
+  value = rawget(environment.globals, name)
+  if value ~= nil then return value end
+
+  return environment.engine.functions[name] or UNDEF
+end
+
+--- What `name` is bound to, or `UNDEF`. `space::member` is the member of what `space` names.
+function Env:get(name: string)
+  local separator = string.find(name, '::', 1, true)
+  if not separator then return lookup(self, name) end
+
+  local space = self:get(string.sub(name, 1, separator - 1))
+  if type(space) ~= 'table' then return UNDEF end
+
+  local member = rawget(space, string.sub(name, separator + 2))
+  return if member == nil then UNDEF else member
 end
 function Env:set(name,v,global)
     if global then self.globals[name]=v else self.locals[name]=v end
