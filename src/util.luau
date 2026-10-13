@@ -12,8 +12,12 @@ local util = {}
 --- `text` without the whitespace at its ends. Text that starts and ends on a byte above the
 --- space is handed back as it is, which is most of what a document's lines are.
 function util.trim(text: string): string
+  -- What is not text goes through the two substitutions this once was for everything: a number
+  -- comes back as its digits, and anything else is refused in `gsub`'s words.
+  if type(text) ~= 'string' then return (string.gsub(string.gsub(text, '^%s+', ''), '%s+$', '')) end
+
   local first, last = string.byte(text, 1), string.byte(text, -1)
-  if first and first > 32 and last > 32 and type(text) == 'string' then return text end
+  if first and first > 32 and last > 32 then return text end
 
   return string.match(text, '^%s*(.*%S)') or ''
 end
