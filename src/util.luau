@@ -171,9 +171,14 @@ function util.copyTree(from: string, to: string): number
   return #entries
 end
 
+local SegmentPatterns: { [string]: string } = {}
+
 --- One glob segment as an anchored Lua pattern: `*` any run and `?` any one character, neither
 --- crossing a slash, and everything else itself.
 local function segmentPattern(segment: string): string
+  local known = SegmentPatterns[segment]
+  if known then return known end
+
   local out = { '^' }
   for index = 1, #segment do
     local character = string.sub(segment, index, index)
@@ -190,7 +195,10 @@ local function segmentPattern(segment: string): string
   end
 
   table.insert(out, '$')
-  return table.concat(out)
+  local pattern = table.concat(out)
+  SegmentPatterns[segment] = pattern
+
+  return pattern
 end
 
 --- A path's segments: what lies before each slash of `path` with one appended.
@@ -209,10 +217,11 @@ function util.globMatch(path: string, glob: string): boolean
   local pathSegments = segments((string.gsub(string.gsub(path, '\\', '/'), '^%./', '')))
   local globSegments = segments((string.gsub(string.gsub(glob, '\\', '/'), '^%./', '')))
   local pathCount, globCount = #pathSegments, #globSegments
-  local memo: { [string]: boolean } = {}
+  local width = pathCount + 2
+  local memo: { [number]: boolean } = {}
 
   local function matches(globIndex: number, pathIndex: number): boolean
-    local key = `{globIndex}:{pathIndex}`
+    local key = globIndex * width + pathIndex
     local known = memo[key]
     if known ~= nil then return known end
 
