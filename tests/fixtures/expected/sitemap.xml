@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://example.test/docs/</loc></url>
+<url><loc>https://example.test/docs/custom/place/</loc></url>
+<url><loc>https://example.test/docs/guide/</loc></url>
+<url><loc>https://example.test/docs/guide/deep/</loc></url>
+<url><loc>https://example.test/docs/guide/deep/alpha_page/</loc></url>
+<url><loc>https://example.test/docs/guide/deep/beta/</loc></url>
+<url><loc>https://example.test/docs/guide/deep/zeta/</loc></url>
+<url><loc>https://example.test/docs/guide/first/</loc><lastmod>2024-04-02</lastmod></url>
+<url><loc>https://example.test/docs/guide/second/</loc></url>
+<url><loc>https://example.test/docs/news/</loc></url>
+<url><loc>https://example.test/docs/news/one/</loc></url>
+<url><loc>https://example.test/docs/news/two/</loc></url>
+</urlset>

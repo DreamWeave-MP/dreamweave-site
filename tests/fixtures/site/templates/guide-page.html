@@ -1,0 +1,3 @@
+{% extends "page.html" %}
+{% block title %}Guide: {{ super() }}{% endblock title %}
+{% block footer %}<em>{{ page.extra.level | default(value="any") | capitalize }}</em>{% endblock footer %}

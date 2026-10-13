@@ -1,0 +1,13 @@
+<nav>
+{% for item in config.extra.menu -%}
+  {{ helpers::link(url=item.url, label=item.name, last=loop.last) }}
+{% endfor -%}
+{% set root = get_section(path="_index.md") -%}
+<ol>
+{% for path in root.subsections %}{% set sub = get_section(path=path) -%}
+  <li data-index="{{ loop.index }}" data-index0="{{ loop.index0 }}"{% if loop.first %} class="first"{% elif loop.last %} class="last"{% endif %}><a href="{{ sub.permalink | safe }}">{{ sub.title }}</a> ({{ sub.pages | length }} page{{ sub.pages | length | pluralize }})</li>
+{% else %}
+  <li>No sections</li>
+{% endfor -%}
+</ol>
+</nav>

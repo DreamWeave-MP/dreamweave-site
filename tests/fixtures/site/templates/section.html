@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ section.title }}{% endblock title %}
+{% block content %}
+<section>
+<h1>{{ section.title }}</h1>
+<p class="trail">{% for ancestor in section.ancestors %}{% set up = get_section(path=ancestor) %}{{ up.title }} &gt; {% endfor %}{{ section.title }}</p>
+{{ section.content | safe }}
+<ul class="pages">
+{% for page in section.pages %}
+  <li><a href="{{ page.permalink | safe }}">{{ page.title }}</a>{% if page.date %} <time>{{ page.date | date(format="%Y") }}</time>{% endif %}{% if page.draft %} draft{% endif %} w{{ page.weight }}</li>
+{% endfor %}
+</ul>
+<ul class="subsections">
+{% for path in section.subsections %}
+  {% set sub = get_section(path=path) %}<li>{{ sub.title }} ({{ sub.path }})</li>
+{% endfor %}
+</ul>
+<nav class="toc">
+{% for entry in section.toc %}<a class="h{{ entry.level }}" href="{{ entry.permalink | safe }}">{{ entry.title }}</a>
+{% endfor %}</nav>
+</section>
+{% endblock content %}

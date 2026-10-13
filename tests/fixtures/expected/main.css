@@ -1,0 +1,68 @@
+@import url('https://fonts.test/font.css') {
+}
+@import 'theme.css' {
+}
+:root {
+  --accent: #36c;
+  --mixed: #193257;
+  --faded: rgba(51, 102, 204, 0.5);
+  --gap: 8px;
+}
+@font-face {
+  font-family: 'Fixture Sans';
+  src: url('fonts/fixture.woff2') format('woff2');
+  font-display: swap;
+}
+body {
+  margin: 0;
+  font-family: 'Fixture Sans', sans-serif;
+  color: #102030;
+  background: #889098;
+}
+.card, .panel, .tile {
+  padding: 8px;
+  border: 1px solid rgba(#102030, 0.25);
+}
+.card, .panel, .tile {
+  border-radius: 4px;
+}
+.card:hover, .panel:hover, .tile:hover {
+  border-color: #36c;
+}
+.card .title, .panel .title, .tile .title {
+  font-weight: bold;
+}
+.card .title, .panel .title, .tile .title {
+  box-shadow: 4px 4px 2px #000;
+}
+.card .title .inner, .panel .title .inner, .tile .title .inner {
+  box-shadow: none;
+}
+.card .title.large, .card .title > small, .panel .title.large, .panel .title > small, .tile .title.large, .tile .title > small {
+  font-size: 2em;
+}
+.card a, .card button, .panel a, .panel button, .tile a, .tile button {
+  color: #36c;
+}
+.message, .error {
+  padding: 8px;
+  color: #102030;
+}
+.error, .error.fatal {
+  color: #f00;
+}
+.error.fatal, .error.fatal.fatal {
+  font-weight: bold;
+}
+@media (min-width: 600px) {
+  .card {
+    padding: 8px 8px;
+  }
+  .card {
+    margin: 16px;
+  }
+}
+.unknown-variable {
+  width: $nope;
+  height: calc(100% - 8px);
+}

@@ -1,0 +1,29 @@
+base_url = "https://example.test/docs"
+title = "Fixture & Sons"
+description = "A fixture site, <small> but \"complete\""
+default_language = "en"
+author = "The Fixture Author"
+build_search_index = true
+generate_feeds = true
+feed_filenames = ["atom.xml", "rss.xml"]
+ignored_content = ["**/*.draft.md", "skip/**"]
+
+[markdown]
+insert_anchor_links = "right"
+
+[search]
+index_format = "fuse_json"
+include_title = true
+include_description = true
+include_content = true
+include_path = true
+truncate_content_length = 600
+
+[extra]
+tagline = "only fixtures"
+numbers = [3, 1, 2]
+menu = [
+  { name = "Home", url = "@/_index.md" },
+  { name = "Guide", url = "@/guide/_index.md" },
+  { name = "Elsewhere", url = "https://elsewhere.test/" },
+]

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+<title>Fixture &amp; Sons</title>
+<subtitle>A fixture site, &lt;small&gt; but &quot;complete&quot;</subtitle>
+<link rel="self" type="application/atom+xml" href="https://example.test/docs/atom.xml"/>
+<link rel="alternate" type="text/html" href="https://example.test/docs"/>
+<generator uri="https://www.getzola.org/">Zola</generator>
+<updated>2025-06-07T00:00:00+00:00</updated>
+<id>https://example.test/docs/atom.xml</id>
+<entry xml:lang="en">
+<title>News two</title>
+<published>2025-06-07T00:00:00+00:00</published>
+<updated>2025-06-07T00:00:00+00:00</updated>
+<author><name>The Fixture Author</name></author>
+<link rel="alternate" type="text/html" href="https://example.test/docs/news/two/"/>
+<id>https://example.test/docs/news/two/</id>
+<content type="html" xml:base="https://example.test/docs/news/two/">&lt;p&gt;Summary of the newer news.&lt;/p&gt;
+&lt;!--more--&gt;
+&lt;p&gt;The rest of it.&lt;/p&gt;
+</content>
+</entry>
+<entry xml:lang="en">
+<title>Second thoughts</title>
+<published>2025-01-15T00:00:00+00:00</published>
+<updated>2025-01-15T00:00:00+00:00</updated>
+<author><name>The Fixture Author</name></author>
+<link rel="alternate" type="text/html" href="https://example.test/docs/guide/second/"/>
+<id>https://example.test/docs/guide/second/</id>
+<content type="html" xml:base="https://example.test/docs/guide/second/">&lt;p&gt;Second page, with YAML frontmatter and a link to &lt;a href=&quot;https://example.test/docs/guide/&quot;&gt;the guide&lt;/a&gt; and &lt;a href=&quot;https://example.test/docs/guide/first/&quot;&gt;first&lt;/a&gt;.&lt;/p&gt;
+&lt;h2 id=&quot;a-heading&quot;&gt;A heading&lt;a class=&quot;zola-anchor&quot; href=&quot;#a-heading&quot; aria-label=&quot;Anchor link for: A heading&quot;&gt;§&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id=&quot;a-heading-2&quot;&gt;A heading&lt;a class=&quot;zola-anchor&quot; href=&quot;#a-heading-2&quot; aria-label=&quot;Anchor link for: A heading&quot;&gt;§&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id=&quot;a-heading-3&quot;&gt;A   heading!&lt;a class=&quot;zola-anchor&quot; href=&quot;#a-heading-3&quot; aria-label=&quot;Anchor link for: A   heading!&quot;&gt;§&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Words words words.&lt;/p&gt;
+</content>
+</entry>
+<entry xml:lang="en">
+<title>First steps</title>
+<published>2024-03-01T00:00:00+00:00</published>
+<updated>2024-04-02T00:00:00+00:00</updated>
+<author><name>Ada</name></author>
+<author><name>Grace</name></author>
+<link rel="alternate" type="text/html" href="https://example.test/docs/guide/first/"/>
+<id>https://example.test/docs/guide/first/</id>
+<summary type="html">&lt;p&gt;The summary paragraph, before the fold.&lt;/p&gt;
+</summary>
+</entry>
+<entry xml:lang="en">
+<title>News one</title>
+<published>2024-01-05T00:00:00+00:00</published>
+<updated>2024-01-05T00:00:00+00:00</updated>
+<author><name>The Fixture Author</name></author>
+<link rel="alternate" type="text/html" href="https://example.test/docs/news/one/"/>
+<id>https://example.test/docs/news/one/</id>
+<content type="html" xml:base="https://example.test/docs/news/one/">&lt;p&gt;Old news.&lt;/p&gt;
+</content>
+</entry>
+</feed>

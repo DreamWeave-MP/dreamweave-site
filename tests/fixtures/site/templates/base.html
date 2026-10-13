@@ -1,0 +1,23 @@
+{% import "macros/helpers.html" as helpers %}
+{#- a comment, trimmed on both sides -#}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}{{ config.title }}{% endblock title %}</title>
+<meta name="description" content="{{ config.description }}">
+<link rel="stylesheet" href="{{ get_url(path="main.css", cachebust=true) }}">
+<link rel="stylesheet" href="{{ get_url(path="css/site.css", cachebust=true) }}">
+<script src="{{ get_url(path="js/app.js?v=1", cachebust=true) }}"></script>
+<link rel="canonical" href="{{ current_url }}">
+</head>
+<body>
+{% include "partials/nav.html" %}
+<main>
+{%- block content %}
+<p>The base content, {{ config.extra.tagline }}.</p>
+{% endblock content -%}
+</main>
+<footer>{% block footer %}{{ helpers::stamp(label="base") }}{% endblock footer %}</footer>
+</body>
+</html>

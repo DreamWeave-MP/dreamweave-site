@@ -1,0 +1,681 @@
+--!strict
+--!native
+-- The site generator's own cases. `fixtures/site` is a whole small site, built by every case that
+-- needs one, and `fixtures/expected` is every file that build writes, pinned byte for byte: the
+-- templates, the Markdown, the Sass, the search index and the feeds are held by that tree. The
+-- cases around it pin each module's own contract and the text of every error. Sites and
+-- templates the cases make go under the folder the harness names as `scratchRoot`.
+local expr = require '@dreamweave/site/expr'
+local jessJson = require '@jess/json'
+local json = require '@dreamweave/site/json'
+local markdown = require '@dreamweave/site/markdown'
+local sass = require '@dreamweave/site/sass'
+local site = require '@dreamweave/site'
+local tera = require '@dreamweave/site/tera'
+local test = require '@jess/test'
+local util = require '@dreamweave/site/util'
+local expect = test.expect
+local suite = test.new()
+
+--- Where this file is, from its chunk name: the folder the suite and its fixtures are in.
+local function here(): string
+  local source = debug.info(1, 's')
+  local first = string.sub(source, 1, 1)
+  local path = if first == '@' or first == '=' then string.sub(source, 2) else source
+
+  return string.match(path, '^(.*)/[^/]*$') or '.'
+end
+
+local scratchRoot = assert(rawget(_G :: any, 'scratchRoot') :: string?, 'the suite needs a scratchRoot')
+local fixture, expected = `{here()}/fixtures/site`, `{here()}/fixtures/expected`
+local made = 0
+
+--- A folder of its own below the scratch root, holding `files` (relative path to contents).
+local function tree(files: { [string]: string }): string
+  made += 1
+  local root = `{scratchRoot}/tree-{made}`
+  jess.fs.createDir(root)
+
+  for name, contents in files do
+    util.write(`{root}/{name}`, contents)
+  end
+
+  return root
+end
+
+--- The relative paths below `root`, in the order `util.walk` gives them.
+local function relatives(root: string): { string }
+  return [for entry in util.walk(root) => entry.relative]
+end
+
+--- Raises unless `built` holds exactly the files `pinned` does, with the same bytes.
+local function sameTree(built: string, pinned: string)
+  expect(relatives(built)).toEqual(relatives(pinned))
+
+  for _, entry in util.walk(pinned) do
+    local wanted = assert(jess.fs.read(entry.path))
+    local got = assert(jess.fs.read(`{built}/{entry.relative}`))
+    if got == wanted then continue end
+
+    local offset = 1
+    while string.byte(got, offset) == string.byte(wanted, offset) do
+      offset += 1
+    end
+
+    error(`{entry.relative} differs from the pinned file at byte {offset} ({#got} bytes against {#wanted})`, 0)
+  end
+end
+
+--- A site with one section, one page and the three templates a build needs, plus `files`.
+local function smallSite(files: { [string]: string }): string
+  local all = {
+    ['config.toml'] = 'base_url = "https://small.test"\n',
+    ['content/_index.md'] = '+++\ntitle = "Root"\n+++\n\nRoot body.\n',
+    ['content/page.md'] = '+++\ntitle = "Page"\n+++\n\nPage body.\n',
+    ['templates/index.html'] = '<h1>{{ section.title }}</h1>{{ section.content | safe }}',
+    ['templates/section.html'] = '<h2>{{ section.title }}</h2>',
+    ['templates/page.html'] = '<h3>{{ page.title }}</h3>{{ page.content | safe }}',
+  }
+
+  for name, contents in files do
+    all[name] = contents
+  end
+
+  return tree(all)
+end
+
+local templateRoot = tree { ['templates/keep.txt'] = '' }
+local engine = tera.Engine.new(templateRoot, { markdown = markdown })
+local templates = 0
+
+--- `source` rendered as a template of its own, and the name it was given.
+local function render(source: string, variables: { [string]: unknown }?): (string, string)
+  templates += 1
+  local name = `case-{templates}.html`
+  util.write(`{templateRoot}/templates/{name}`, source)
+
+  return engine:render(name, variables or {}), name
+end
+
+--- The name the next `render` gives its template: what a parse error starts with.
+local function nextName(): string return `case-{templates + 1}.html` end
+
+suite.describe('util', function()
+  suite.it('trims, escapes and slugs text', function()
+    expect(util.trim '  a b \n\t').toBe 'a b'
+    expect(util.trim ' \n ').toBe ''
+    expect(util.trim '').toBe ''
+    expect(util.escapeHtml '<a href="x">\'&\'</a>').toBe '&lt;a href=&quot;x&quot;&gt;&#x27;&amp;&#x27;&lt;/a&gt;'
+    expect(util.escapeHtml '&amp;').toBe '&amp;amp;'
+    expect(util.escapeHtml(5)).toBe '5'
+    expect(util.escapeAttribute '"<>"').toBe '&quot;&lt;&gt;&quot;'
+    expect(util.slugify 'Hello, World!').toBe 'hello-world'
+    expect(util.slugify '--A  b--').toBe 'a-b'
+    expect(util.slugify(12.5)).toBe '12.5'
+    expect(util.slugify 'a_b~c.d').toBe 'a_b~c.d'
+    expect(util.slugify '!!!').toBe ''
+  end)
+
+  suite.it('copies tables and tells an array from a map', function()
+    local source = { 1, 2, name = 'x' }
+    local copy = util.copy(source)
+    expect(copy).toEqual(source)
+    expect(copy ~= source).toBe(true)
+    expect(util.copy(nil)).toEqual {}
+    expect(util.arrayCopy { 1, 2, nil, 4 } :: { number }).toEqual { 1, 2 }
+    expect(util.arrayCopy(nil)).toEqual {}
+    expect(util.isArray {}).toBe(true)
+    expect(util.isArray { 1, 2, 3 }).toBe(true)
+    expect(util.isArray { 1, nil, 3 } :: { number }).toBe(false)
+    expect(util.isArray { name = 1 }).toBe(false)
+    expect(util.isArray { [0] = 1 }).toBe(false)
+    expect(util.isArray { [1.5] = 1 }).toBe(false)
+    expect(util.isArray 'text').toBe(false)
+  end)
+
+  suite.it('joins urls and reads extensions', function()
+    expect(util.joinUrl('https://a.test/', '/x/y')).toBe 'https://a.test/x/y'
+    expect(util.joinUrl('https://a.test//', '')).toBe 'https://a.test/'
+    expect(util.joinUrl('https://a.test', '///x/')).toBe 'https://a.test/x/'
+    expect(util.joinUrl('base', 'https://b.test')).toBe 'https://b.test'
+    expect(util.joinUrl('base', 'http://b.test')).toBe 'http://b.test'
+    expect(util.joinUrl('base', '#fragment')).toBe '#fragment'
+    expect(util.joinUrl('', 'x')).toBe '/x'
+    expect(util.pathExtension 'a/b.tar.gz').toBe 'gz'
+    expect(util.pathExtension 'a.b/c').toBeNil()
+    expect(util.pathExtension 'none').toBeNil()
+  end)
+
+  suite.it('matches globs a segment at a time', function()
+    expect(util.globMatch('a/b/c.md', '**/*.md')).toBe(true)
+    expect(util.globMatch('c.md', '**/*.md')).toBe(true)
+    expect(util.globMatch('a/b.txt', '*.txt')).toBe(false)
+    expect(util.globMatch('a/b.txt', 'a/?.txt')).toBe(true)
+    expect(util.globMatch('a/bc.txt', 'a/?.txt')).toBe(false)
+    expect(util.globMatch('a\\b.txt', './a/*.txt')).toBe(true)
+    expect(util.globMatch('skip/x/y.md', 'skip/**')).toBe(true)
+    expect(util.globMatch('skip', 'skip/**')).toBe(true)
+    expect(util.globMatch('skipped/x', 'skip/**')).toBe(false)
+    expect(util.globMatch('a.md', 'a+md')).toBe(false)
+    expect(util.globMatch('a+md', 'a+md')).toBe(true)
+    expect(util.globMatch('ab', 'a[b]')).toBe(false)
+    expect(util.globMatch('a/b/c', 'a/**/c')).toBe(true)
+    expect(util.globMatch('a/c', 'a/**/c')).toBe(true)
+    expect(util.globMatch('a/b/d', 'a/**/c')).toBe(false)
+  end)
+
+  suite.it('splits on a plain separator', function()
+    expect(util.split 'a,b,,c').toEqual { 'a', 'b', '', 'c' }
+    expect(util.split('abc', '')).toEqual { 'a', 'b', 'c' }
+    expect(util.split('a--b', '--')).toEqual { 'a', 'b' }
+    expect(util.split('', ',')).toEqual { '' }
+    expect(util.split('a.b', '.')).toEqual { 'a', 'b' }
+    expect(util.split('', '')).toEqual {}
+  end)
+
+  suite.it('walks a folder in name order, and writes and copies below folders it makes', function()
+    local root = tree { ['b.txt'] = 'b', ['a/z.txt'] = 'z', ['a/c/d.txt'] = 'd', ['B.txt'] = 'B' }
+    expect(relatives(root)).toEqual { 'B.txt', 'a/c/d.txt', 'a/z.txt', 'b.txt' }
+    expect(util.walk(root)[2].path).toBe(jess.fs.join(jess.fs.join(jess.fs.join(root, 'a'), 'c'), 'd.txt'))
+    expect(util.walk(`{root}/absent`)).toEqual {}
+
+    local kept = { { path = 'kept', relative = 'kept' } }
+    expect(util.walk(`{root}/a`, kept, 'under') == kept).toBe(true)
+    expect([for entry in kept => entry.relative]).toEqual { 'kept', 'under/c/d.txt', 'under/z.txt' }
+
+    expect(util.copyTree(root, `{root}-copy/deep`)).toBe(4)
+    expect(relatives(`{root}-copy/deep`)).toEqual(relatives(root))
+    expect(jess.fs.read(`{root}-copy/deep/a/c/d.txt`)).toBe 'd'
+    util.copyFile(`{root}/b.txt`, `{root}-copy/other/place/b.txt`)
+    expect(util.readRequired(`{root}-copy/other/place/b.txt`)).toBe 'b'
+    expect(function() util.readRequired(`{root}/nothing.txt`) end).toThrow(`read {root}/nothing.txt: file does not exist`)
+  end)
+end)
+
+suite.describe('json', function()
+  suite.it('writes compact values, objects by sorted key', function()
+    expect(json.encode({ 1, 2, 3 }, false)).toBe '[1,2,3]'
+    expect(json.encode({}, false)).toBe '{}'
+    expect(json.encode(json.array(), false)).toBe '[]'
+    expect(json.encode(json.object { beta = 1, alpha = 2 }, false)).toBe '{"alpha":2,"beta":1}'
+    expect(json.encode({ beta = { true, false }, alpha = 'x' }, false)).toBe '{"alpha":"x","beta":[true,false]}'
+    expect(json.encode(jessJson.null, false)).toBe 'null'
+    expect(json.encode(nil, false)).toBe 'null'
+    expect(json.encode({ jessJson.null, 0, -0, 1.5, 1e21, -7 }, false)).toBe '[null,0,0,1.5,1e+21,-7]'
+  end)
+
+  suite.it('keeps an object\'s given key order, then the rest sorted', function()
+    expect(json.encode(json.object({ beta = 1, alpha = 2 }, { 'beta', 'alpha' }), false)).toBe '{"beta":1,"alpha":2}'
+    expect(json.encode(json.object({ zulu = 1, alpha = 2, mike = 3 }, { 'mike', 'quebec' }), false)).toBe '{"mike":3,"alpha":2,"zulu":1}'
+  end)
+
+  suite.it('escapes what a string must', function()
+    expect(json.encode('a"b\\c\n\t\r\b\f\1\31 é/', false)).toBe '"a\\"b\\\\c\\n\\t\\r\\b\\f\\u0001\\u001f é/"'
+    expect(json.encode('', false)).toBe '""'
+    expect(json.encode({ ['k"'] = 1 }, false)).toBe '{"k\\"":1}'
+  end)
+
+  suite.it('writes pretty output by default, with a newline', function()
+    local value = { alpha = { 1, 2 }, beta = json.array(), gamma = json.object(), delta = {}, epsilon = { inner = 'g' } }
+    expect(json.encode(value)).toBe '{\n  "alpha": [\n    1,\n    2\n  ],\n  "beta": [],\n  "delta": {},\n  "epsilon": {\n    "inner": "g"\n  },\n  "gamma": {}\n}\n'
+    expect(json.encode(value, true)).toBe(json.encode(value))
+    expect(json.encode 'x').toBe '"x"\n'
+  end)
+
+  suite.it('copies into marked arrays and objects', function()
+    expect(json.encode(json.arrayCopy(nil), false)).toBe '[]'
+    expect(json.encode(json.objectCopy(nil), false)).toBe '{}'
+    expect(json.encode(json.arrayCopy { 'a', 'b' }, false)).toBe '["a","b"]'
+    expect(json.encode(json.objectCopy { alpha = 1 }, false)).toBe '{"alpha":1}'
+    expect(json.encode({ json.array { 1 }, json.object {} }, false)).toBe '[[1],{}]'
+
+    local shared = { 1 }
+    expect(json.encode({ shared, shared }, false)).toBe '[[1],[1]]'
+  end)
+
+  suite.it('refuses what JSON has no spelling for', function()
+    local cycle = {}
+    cycle.self = cycle
+
+    expect(function() json.encode(math.huge, false) end).toThrow 'JSON cannot encode a non-finite number'
+    expect(function() json.encode({ 0 / 0 }) end).toThrow 'JSON cannot encode a non-finite number'
+    expect(function() json.encode(cycle, false) end).toThrow 'JSON cannot encode a cyclic table'
+    expect(function() json.encode(cycle) end).toThrow 'JSON cannot encode a cyclic table'
+    expect(function() json.encode(print, false) end).toThrow 'JSON cannot encode function'
+    expect(function() json.encode({ alpha = 1, [1] = 2 }, false) end).toThrow 'JSON object keys must be strings'
+    expect(function() json.encode({ 1, nil, 3 } :: { number }, false) end).toThrow 'JSON object keys must be strings'
+    expect(function() json.encode(json.object({ alpha = 1, [2] = 2 }, { 'alpha' })) end).toThrow 'JSON object keys must be strings'
+  end)
+end)
+
+suite.describe('expr', function()
+  suite.it('tells truth the way templates do', function()
+    expect(expr.truthy(nil)).toBe(false)
+    expect(expr.truthy(false)).toBe(false)
+    expect(expr.truthy(expr.UNDEF)).toBe(false)
+    expect(expr.truthy(jessJson.null)).toBe(false)
+    expect(expr.truthy '').toBe(false)
+    expect(expr.truthy 'a').toBe(true)
+    expect(expr.truthy(0)).toBe(false)
+    expect(expr.truthy(1)).toBe(true)
+    expect(expr.truthy {}).toBe(false)
+    expect(expr.truthy { 1 }).toBe(true)
+    expect(expr.truthy(tera.safe '')).toBe(false)
+    expect(expr.truthy(tera.safe 'x')).toBe(true)
+    expect(expr.truthy(print)).toBe(true)
+    expect(expr.truthy(true)).toBe(true)
+  end)
+
+  suite.it('unwraps safe text and nulls, and reads attributes rawly', function()
+    expect(expr.unwrap(jessJson.null)).toBeNil()
+    expect(expr.unwrap(tera.safe 'x')).toBe 'x'
+    expect(expr.unwrap(5)).toBe(5)
+    expect(expr.getAttr({ name = 1 }, 'name')).toBe(1)
+    expect(expr.getAttr({ name = false }, 'name')).toBe(false)
+    expect(expr.getAttr({}, 'name')).toBe(expr.UNDEF)
+    expect(expr.getAttr(nil, 'name')).toBe(expr.UNDEF)
+    expect(expr.getAttr('text', 'len')).toBe(expr.UNDEF)
+    expect(expr.getAttr(tera.safe 'x', 'value')).toBe(expr.UNDEF)
+    expect(expr.getAttr(setmetatable({}, { __index = { name = 1 } }), 'name')).toBe(expr.UNDEF)
+    expect(tera.UNDEF).toBe(expr.UNDEF)
+  end)
+
+  suite.it('compiles an expression once and evaluates it against an environment', function()
+    local environment = tera.Env.new(engine, { count = 3, name = 'x' })
+    expect(expr.compile ' count + 1 ').toBe(expr.compile ' count + 1 ')
+    expect(expr.eval('count + 1', environment)).toBe(4)
+    expect(expr.eval('count * 2 ~ name', environment)).toBe '6x'
+    expect(expr.eval('missing', environment)).toBe(expr.UNDEF)
+    expect(expr.eval('[count, name, "lit"]', environment)).toEqual { 3, 'x', 'lit' }
+    expect(expr.eval('none', environment)).toBeNil()
+    expect(expr.eval('- count', environment)).toBe(-3)
+    expect(expr.eval('- name', environment)).toBe(-0)
+    expect(expr.eval('count is odd and not (name is number)', environment)).toBe(true)
+    expect(expr.evalNode(expr.compile 'name', environment)).toBe 'x'
+    expect(expr.evalNode(expr.compile '1 + 2', environment)).toBe(3)
+  end)
+
+  suite.it('raises on what it cannot read', function()
+    local environment = tera.Env.new(engine, {})
+    expect(function() expr.eval('a ? b', environment) end).toThrow 'template expression: unexpected character ? in a ? b'
+    expect(function() expr.eval('1 +', environment) end).toThrow 'template expression: unexpected token eof in 1 +'
+    expect(function() expr.eval('(1', environment) end).toThrow 'template expression: expected ), got eof in (1'
+    expect(function() expr.eval('a b', environment) end).toThrow 'template expression: trailing token b in a b'
+    expect(function() expr.eval('1e3', environment) end).toThrow 'template expression: trailing token e3 in 1e3'
+    expect(function() expr.eval('[1, 2', environment) end).toThrow 'template expression: expected ,, got eof in [1, 2'
+    expect(function() expr.eval('f(a=1', environment) end).toThrow 'template expression: expected ,, got eof in f(a=1'
+    expect(function() expr.eval('missing()', environment) end).toThrow 'attempt to call a non-callable template value'
+    expect(function() expr.eval('1 < "a"', environment) end).toThrow 'attempt to compare number < string'
+  end)
+end)
+
+suite.describe('markdown', function()
+  suite.it('renders a document and its table of contents', function()
+    local document = markdown.renderDocument '# Title\r\n\r\ntext\r\n\n## Sub *part*\n'
+    expect(document.html).toBe '<h1 id="title">Title</h1>\n<p>text</p>\n<h2 id="sub-part">Sub <em>part</em></h2>\n'
+    expect(document.toc).toEqual {
+      { level = 1, id = 'title', title = 'Title', permalink = '#title' },
+      { level = 2, id = 'sub-part', title = 'Sub part', permalink = '#sub-part' },
+    }
+
+    expect(markdown.renderDocument('').html).toBe ''
+    expect(markdown.renderDocument('').toc).toEqual {}
+  end)
+
+  suite.it('puts anchor links where it is told to', function()
+    local left = markdown.renderDocument('# A "b"', { insertAnchorLinks = 'left' })
+    local right = markdown.renderDocument('# A "b"', { insertAnchorLinks = 'right' })
+    local anchor = '<a class="zola-anchor" href="#a-b" aria-label="Anchor link for: A &quot;b&quot;">§</a>'
+    expect(left.html).toBe(`<h1 id="a-b">{anchor}A &quot;b&quot;</h1>\n`)
+    expect(right.html).toBe(`<h1 id="a-b">A &quot;b&quot;{anchor}</h1>\n`)
+  end)
+
+  suite.it('numbers repeated headings and names an empty one', function()
+    local document = markdown.renderDocument '# Same\n\n# Same\n\n# Same\n\n# !!!\n\n# ???\n'
+    expect([for entry in document.toc => entry.id]).toEqual { 'same', 'same-2', 'same-3', 'section', 'section-2' }
+  end)
+
+  suite.it('hands links to the resolver, images marked', function()
+    local seen = {}
+    local options = {
+      resolveLink = function(href: string, image: boolean): string?
+        table.insert(seen, `{href}:{image}`)
+        return if href == 'keep' then nil else `/resolved/{href}`
+      end,
+    }
+
+    expect(markdown.render('[a](one) ![b](two) [c](keep)', options)).toBe '<p><a href="/resolved/one">a</a> <img src="/resolved/two" alt="b"> <a href="keep">c</a></p>\n'
+    expect(seen).toEqual { 'one:false', 'two:true', 'keep:false' }
+  end)
+
+  suite.it('renders inline text alone when asked', function()
+    expect(markdown.render('a *b* `c<d`', { inline = true })).toBe 'a <em>b</em> <code>c&lt;d</code>'
+    expect(markdown.render(nil, { inline = true })).toBe ''
+    expect(markdown.render(12, { inline = true })).toBe '12'
+    expect(markdown.inline 'x **y** ~~z~~ <https://a.test> <b>').toBe 'x <strong>y</strong> <del>z</del> <a href="https://a.test">https://a.test</a> <b>'
+    expect(markdown.inline 'a ``b ` c`` d').toBe 'a <code>b ` c</code> d'
+    expect(markdown.inline 'snake_case_name and _em_ and a*b*c').toBe 'snake<em>case_name and </em>em_ and a<em>b</em>c'
+    expect(markdown.inline '[t](u "v") ![i](s \'w\')').toBe '<a href="u" title="v">t</a> <img src="s" alt="i" title="w">'
+    expect(markdown.inline '\\* \\q <unclosed [x] ![y] `z').toBe '* \\q &lt;unclosed [x] ![y] `z'
+    expect(markdown.inline '').toBe ''
+  end)
+
+  suite.it('renders the block kinds', function()
+    expect(markdown.render '- a\n- b\n\n1. c\n2. d').toBe '<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n<ol>\n<li>c</li>\n<li>d</li>\n</ol>\n'
+    expect(markdown.render '> q\n> r\n\nafter').toBe '<blockquote>\n<p>q\nr</p>\n</blockquote>\n<p>after</p>\n'
+    expect(markdown.render '```luau\nlocal a = "<"\n```\nafter').toBe '<pre><code class="language-luau">local a = &quot;&lt;&quot;\n</code></pre>\n<p>after</p>\n'
+    expect(markdown.render '```\nunclosed').toBe '<pre><code>unclosed\n</code></pre>\n'
+    expect(markdown.render 'a | b\n--|--\n1 | 2\n\nend').toBe '<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>\n<p>end</p>\n'
+    expect(markdown.render 'Title\n===\n\nSub\n---\n\n***\n').toBe '<h1 id="title">Title</h1>\n<h2 id="sub">Sub</h2>\n<hr>\n'
+    expect(markdown.render '<div>\nraw *kept*\n</div>\n\npara  \nbreak').toBe '<div>\nraw *kept*\n</div>\n<p>para<br>\nbreak</p>\n'
+    expect(markdown.render '####### seven\n').toBe '<p>####### seven</p>\n'
+  end)
+end)
+
+suite.describe('sass', function()
+  suite.it('compiles indented source', function()
+    expect(sass.compile '$a: 1px\n.x\n  width: $a\n  .y &\n    height: $a\n').toBe '.x {\n  width: 1px;\n}\n.y .x {\n  height: 1px;\n}\n'
+    expect(sass.compile '').toBe ''
+    expect(sass.compile(nil)).toBe ''
+    expect(sass.compile '.empty\n').toBe ''
+    expect(sass.compile '=m($a, $b: 2)\n  left: $a\n  right: $b\n.x\n  +m(1)\n.y\n  +m($b: 3, $a: 4)\n').toBe '.x {\n  left: 1;\n  right: 2;\n}\n.y {\n  left: 4;\n  right: 3;\n}\n'
+    expect(sass.compile '.a\n  color: mix(#000, #fff)\n  fill: mix(#000000, #ffffff, 25%)\n  stroke: rgba(#fff, 0.5)\n  outline: mix(red, blue)\n').toBe '.a {\n  color: #808080;\n  fill: #bfbfbf;\n  stroke: rgba(255, 255, 255, 0.5);\n  outline: mix(red, blue);\n}\n'
+  end)
+
+  suite.it('raises on a mixin it cannot call', function()
+    expect(function() sass.compile '.x\n  +nope\n' end).toThrow 'sass: unknown mixin nope'
+    expect(function() sass.compile '=m($a)\n  left: $a\n.x\n  +m\n' end).toThrow 'sass: missing mixin argument $a'
+  end)
+
+  suite.it('expands imports from files, and refuses a cycle', function()
+    local root = tree {
+      ['main.sass'] = '@import "part"\n@import other\n.x\n  color: $c\n',
+      ['_part.sass'] = '$c: red\n',
+      ['other.scss'] = '.o\n  top: 0\n',
+      ['loop.sass'] = '@import "loop"\n',
+      ['sub/_hidden.sass'] = '.h\n  top: 1\n',
+      ['sub/shown.scss'] = '.s\n  top: 2\n',
+      ['notes.txt'] = 'not sass',
+    }
+
+    expect(sass.compileFile(`{root}/main.sass`)).toBe '.o {\n  top: 0;\n}\n.x {\n  color: red;\n}\n'
+    expect(function() sass.compileFile(`{root}/loop.sass`) end).toThrow(`sass import cycle: {root}/loop.sass`)
+    expect(function() sass.compileFile(`{root}/absent.sass`) end).toThrow(`read {root}/absent.sass: file does not exist`)
+
+    jess.fs.remove(`{root}/loop.sass`)
+    expect(sass.compileDirectory(root, `{root}-css`)).toBe(3)
+    expect(relatives(`{root}-css`)).toEqual { 'main.css', 'other.css', 'sub/shown.css' }
+    expect(jess.fs.read(`{root}-css/sub/shown.css`)).toBe '.s {\n  top: 2;\n}\n'
+  end)
+end)
+
+suite.describe('tera', function()
+  suite.it('writes values escaped unless they are safe', function()
+    local variables = { text = '<b>', safe = tera.safe '<i>', null = jessJson.null, yes = true, no = false, number = 1.5 }
+    expect((render('{{ text }}|{{ text | safe }}|{{ safe }}|{{ null }}|{{ yes }}|{{ no }}|{{ number }}|{{ absent }}', variables))).toBe '&lt;b&gt;|<b>|<i>||true|false|1.5|'
+    expect((render 'plain text, {no tags} here')).toBe 'plain text, {no tags} here'
+    expect((render '')).toBe ''
+  end)
+
+  suite.it('trims around a tag that asks', function()
+    expect((render 'a  {{- 1 -}}  b')).toBe 'a1b'
+    expect((render 'a  {{ 1 }}  b')).toBe 'a  1  b'
+    expect((render 'x {%- if true -%} y {%- endif -%} z')).toBe 'xyz'
+    expect((render 'a {#- gone -#} b {# kept spaces #} c')).toBe 'ab  c'
+  end)
+
+  suite.it('scopes sets to their block, and globals to the render', function()
+    expect((render '{% set a = 1 %}{% for i in [1, 2] %}{% set a = a + i %}{{ a }},{% endfor %}{{ a }}')).toBe '2,3,1'
+    expect((render '{% set_global a = 1 %}{% for i in [1, 2] %}{% set_global a = a + i %}{% endfor %}{{ a }}')).toBe '4'
+    expect((render('{% for key, value in map %}{{ key }}={{ value }};{% endfor %}', { map = { beta = 2, alpha = 1, [3] = 'c' } }))).toBe '3=c;alpha=1;beta=2;'
+    expect((render('{% for item in text %}x{% else %}none{% endfor %}', { text = 'abc' }))).toBe 'none'
+  end)
+
+  suite.it('calls the functions it is given', function()
+    engine:addFunction('double', function(arguments: { number }, named: { value: number? }): number
+      return (named.value or arguments[1]) * 2
+    end)
+
+    expect((render '{{ double(value=4) }} {{ double(3) }} {{ double(value=1 + 1) | int }}')).toBe '8 6 4'
+    expect((render '{% for value in range(end=3) %}{{ value }}{% endfor %}')).toBe '012'
+  end)
+
+  suite.it('keeps an environment\'s names, parents first', function()
+    local environment = tera.Env.new(engine, { shared = 1 })
+    local child = environment:child()
+    environment:set('own', 2, false)
+    child:set('own', 3, false)
+    child:set('made', 4, true)
+    child:set('space', { member = 5 }, false)
+
+    expect(environment:get 'own').toBe(2)
+    expect(child:get 'own').toBe(3)
+    expect(environment:get 'made').toBe(4)
+    expect(child:get 'shared').toBe(1)
+    expect(child:get 'space::member').toBe(5)
+    expect(child:get 'space::absent').toBe(expr.UNDEF)
+    expect(child:get 'absent').toBe(expr.UNDEF)
+    expect(child:get('range').__dw_callable).toBe(true)
+  end)
+
+  suite.it('raises on a template it cannot parse', function()
+    local name = nextName()
+    expect(function() render '{% if x %}open' end).toThrow(`{name}: unterminated if`)
+    name = nextName()
+    expect(function() render '{% for x %}{% endfor %}' end).toThrow(`{name}: malformed for`)
+    name = nextName()
+    expect(function() render '{% for x in y %}open' end).toThrow(`{name}: unterminated for`)
+    name = nextName()
+    expect(function() render '{% set x %}' end).toThrow(`{name}: malformed set`)
+    name = nextName()
+    expect(function() render '{% set_global x %}' end).toThrow(`{name}: malformed set_global`)
+    name = nextName()
+    expect(function() render '{% block a %}open' end).toThrow(`{name}: unterminated block`)
+    name = nextName()
+    expect(function() render '{% macro broken %}{% endmacro %}' end).toThrow(`{name}: malformed macro`)
+    name = nextName()
+    expect(function() render '{% macro m() %}open' end).toThrow(`{name}: unterminated macro`)
+    name = nextName()
+    expect(function() render '{% frobnicate now %}' end).toThrow(`{name}: unsupported template statement: frobnicate now`)
+    name = nextName()
+    expect(function() render '{% endif %}' end).toThrow(`{name}: unsupported template statement: endif`)
+    expect(function() render '{{ open' end).toThrow 'unterminated template tag'
+    expect(function() render '{% include "absent.html" %}' end).toThrow 'absent.html: file does not exist'
+  end)
+
+  suite.it('raises on an expression it cannot evaluate, naming it', function()
+    expect(function() render '{{ a ? b }}' end).toThrow 'template expression [a ? b]: template expression: unexpected character ? in a ? b'
+    expect(function() render '{{ "x" | nope }}' end).toThrow 'template expression ["x" | nope]: unsupported template filter: nope'
+    expect(function() render '{{ 1 is nope }}' end).toThrow 'template expression [1 is nope]: unsupported template test: nope'
+    expect(function() render '{{ throw("boom") }}' end).toThrow 'template expression [throw("boom")]: boom'
+    expect(function() render '{{ throw() }}' end).toThrow 'template expression [throw()]: template threw'
+    expect(function() render '{% if absent() %}x{% endif %}' end).toThrow 'template expression [absent()]: attempt to call a non-callable template value'
+    expect(function() render '{% set x = 1 + %}' end).toThrow 'template expression [1 +]: template expression: unexpected token eof in 1 +'
+  end)
+
+  suite.it('stops a macro that calls itself without end', function()
+    util.write(`{templateRoot}/templates/again.html`, '{% import "again.html" as again %}{% macro once(depth) %}{{ again::once(depth=depth + 1) }}{% endmacro once %}')
+    expect(function() render '{% import "again.html" as again %}{{ again::once(depth=1) }}' end).toThrow 'again.html::once: C stack overflow'
+    expect((render '{% import "again.html" as again %}still renders')).toBe 'still renders'
+  end)
+end)
+
+suite.describe('site', function()
+  suite.it('builds every file of the pinned tree, byte for byte', function()
+    local public = `{scratchRoot}/fixture-public`
+    expect(site.build(fixture, public, {})).toEqual {
+      pages = 12,
+      taxonomies = 5,
+      sections = 4,
+      content_pages = 11,
+      feeds = 2,
+      search = 1,
+      aliases = 2,
+      special = 3,
+    }
+
+    sameTree(public, expected)
+  end)
+
+  suite.it('builds the same tree again over the first, but for the robots file it finds', function()
+    local public = `{scratchRoot}/fixture-twice`
+    site.build(fixture, public)
+    expect(site.build(fixture, public).special).toBe(2)
+    sameTree(public, expected)
+  end)
+
+  suite.it('leaves the feeds and the search index out of an offline build', function()
+    local public = `{scratchRoot}/fixture-offline`
+    local loaded = site.load(fixture, { offline = true })
+    local report = loaded:build(public)
+    expect(report.feeds).toBe(0)
+    expect(report.search).toBe(0)
+    expect(report.pages).toBe(12)
+    expect(loaded.config.extra.dreamweave_offline).toBe(true)
+    expect(jess.fs.isFile(`{public}/atom.xml`)).toBe(false)
+    expect(jess.fs.isFile(`{public}/search_index.en.json`)).toBe(false)
+    expect(jess.fs.read(`{public}/guide/first/index.html`)).toBe(jess.fs.read(`{expected}/guide/first/index.html`))
+  end)
+
+  suite.it('loads sections and pages in path order and connects them', function()
+    local loaded = site.load(fixture)
+    local function titles(items: { { title: string } }): { string } return [for item in items => item.title] end
+
+    expect([for section in loaded.sections => section.relative_path]).toEqual {
+      '_index.md',
+      'guide/_index.md',
+      'guide/deep/_index.md',
+      'news/_index.md',
+    }
+
+    expect([for page in loaded.pages => page.relative_path]).toEqual {
+      'guide/deep/alpha_page.md',
+      'guide/deep/beta/index.md',
+      'guide/deep/zeta.md',
+      'guide/first.md',
+      'guide/hidden.md',
+      'guide/moved.md',
+      'guide/quiet.md',
+      'guide/second.md',
+      'guide/unrendered.md',
+      'news/one.md',
+      'news/two.md',
+    }
+
+    local root, guide, deep, news = loaded.sections[1], loaded.sections[2], loaded.sections[3], loaded.sections[4]
+    expect(titles(guide.pages)).toEqual { 'Second thoughts', 'First steps', 'Quiet', 'Moved', 'Unrendered', 'Hidden draft' }
+    expect(titles(deep.pages)).toEqual { 'Alpha Page', 'Zeta' }
+    expect(titles(news.pages)).toEqual { 'News two', 'News one' }
+    expect(titles(root.pages)).toEqual { 'Beta' }
+    expect(root.subsections).toEqual { 'guide/_index.md', 'news/_index.md' }
+    expect(guide.subsections).toEqual { 'guide/deep/_index.md' }
+    expect(root.ancestors).toEqual {}
+    expect(guide.ancestors).toEqual { '_index.md' }
+    expect(deep.ancestors).toEqual { '_index.md', 'guide/_index.md' }
+    expect(loaded.pagesBySource['guide/deep/zeta.md'].ancestors).toEqual { '_index.md', 'guide/_index.md', 'guide/deep/_index.md' }
+    expect(loaded.pagesBySource['guide/deep/zeta.md'].parent).toBe(deep)
+    expect(loaded.sectionsBySource['news/_index.md']).toBe(news)
+    expect(titles(loaded.taxonomies.tags.Intro)).toEqual { 'First steps', 'Second thoughts', 'News one' }
+    expect(titles(loaded.taxonomies.categories.Releases)).toEqual { 'News one' }
+  end)
+
+  suite.it('gives an item its route, its text and its counts', function()
+    local loaded = site.load(fixture)
+    local quiet, first, beta = loaded.pagesBySource['guide/quiet.md'], loaded.pagesBySource['guide/first.md'], loaded.pagesBySource['guide/deep/beta/index.md']
+    expect({ quiet.path, quiet.permalink, quiet.slug, quiet.in_search_index }).toEqual { '/custom/place/', 'https://example.test/docs/custom/place/', 'quiet-slug', false }
+    expect({ beta.path, beta.slug, beta.colocated_path, beta.source_path }).toEqual { '/guide/deep/beta/', 'index', 'guide/deep/beta/', '@/guide/deep/beta/index.md' }
+    expect({ first.word_count, first.reading_time, first.weight, first.date, first.lang }).toEqual { 117, 1, 2, '2024-03-01', 'en' }
+    expect(first.summary).toBe '<p>The summary paragraph, before the fold.</p>\n'
+    expect(first.aliases).toEqual { 'old/first', 'legacy/first.html', '' }
+    expect([for entry in first.toc => `{entry.level} {entry.id}`]).toEqual { '1 first-heading', '2 second-heading-with-marks', '3 second-heading-with-marks-2' }
+    expect(loaded.sections[1].path).toBe '/'
+    expect(loaded.sections[1].permalink).toBe 'https://example.test/docs/'
+    expect(loaded:outputPath(loaded.sections[1])).toBe 'index.html'
+    expect(loaded:outputPath(quiet)).toBe 'custom/place/index.html'
+    expect(loaded:pageTemplate(quiet)).toBe 'guide-page.html'
+    expect(loaded:pageTemplate(beta)).toBe 'plain.html'
+    expect(loaded:pageTemplate(loaded.pagesBySource['news/one.md'])).toBe 'page.html'
+    expect(loaded:isIgnored 'skip/ignored.md').toBe(true)
+    expect(loaded:isIgnored 'guide/wip.draft.md').toBe(true)
+    expect(loaded:isIgnored 'guide/first.md').toBe(false)
+    expect(loaded:resolveContentLink '@/guide/first.md#x').toBe 'https://example.test/docs/guide/first/#x'
+    expect(loaded:resolveContentLink '@/absent.md').toBe '@/absent.md'
+    expect(loaded:resolveContentLink 'plain').toBe 'plain'
+  end)
+
+  suite.it('lists what the search index and the feeds hold', function()
+    local loaded = site.load(fixture)
+    expect([for row in loaded:searchItems() => row.url]).toEqual {
+      'https://example.test/docs/',
+      'https://example.test/docs/guide/',
+      'https://example.test/docs/guide/deep/',
+      'https://example.test/docs/guide/deep/alpha_page/',
+      'https://example.test/docs/guide/deep/beta/',
+      'https://example.test/docs/guide/deep/zeta/',
+      'https://example.test/docs/guide/first/',
+      'https://example.test/docs/guide/second/',
+      'https://example.test/docs/guide/unrendered/',
+      'https://example.test/docs/news/',
+      'https://example.test/docs/news/one/',
+      'https://example.test/docs/news/two/',
+    }
+
+    expect([for page in loaded:feedPages() => page.relative_path]).toEqual { 'news/two.md', 'guide/second.md', 'guide/first.md', 'news/one.md' }
+  end)
+
+  suite.it('reads a site with no content, and zola.toml when there is no config.toml', function()
+    local root = tree { ['zola.toml'] = 'base_url = "https://bare.test"\n' }
+    local loaded = site.load(root)
+    expect({ #loaded.pages, #loaded.sections, loaded.config.title, loaded.config.default_language }).toEqual { 0, 0, 'Site', 'en' }
+    expect(loaded:build(`{root}/public`)).toEqual {
+      pages = 0,
+      taxonomies = 0,
+      sections = 0,
+      content_pages = 0,
+      feeds = 0,
+      search = 0,
+      aliases = 0,
+      special = 2,
+    }
+
+    expect(jess.fs.read(`{root}/public/robots.txt`)).toBe 'User-agent: *\nDisallow:\nAllow: /\nSitemap: https://bare.test/sitemap.xml\n'
+    expect(jess.fs.read(`{root}/public/sitemap.xml`)).toBe '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n</urlset>\n'
+    expect(function() site.load(`{root}/absent`) end).toThrow 'zola.toml: file does not exist'
+  end)
+
+  suite.it('builds a small site, titles from slugs where a page gives none', function()
+    local root = smallSite { ['content/some_long-name.md'] = 'No frontmatter at all.\n' }
+    local report = site.build(root, `{root}/public`)
+    expect(report.pages).toBe(3)
+    expect(jess.fs.read(`{root}/public/index.html`)).toBe '<h1>Root</h1><p>Root body.</p>\n'
+    expect(jess.fs.read(`{root}/public/page/index.html`)).toBe '<h3>Page</h3><p>Page body.</p>\n'
+    expect(jess.fs.read(`{root}/public/some_long-name/index.html`)).toBe '<h3>Some Long Name</h3><p>No frontmatter at all.</p>\n'
+  end)
+
+  suite.it('raises on frontmatter that never ends', function()
+    local toml = smallSite { ['content/bad.md'] = '+++\ntitle = "x"\n' }
+    local yaml = smallSite { ['content/bad.md'] = '---\ntitle: x\n' }
+    local empty = smallSite { ['content/bad.md'] = '+++\n+++\nbody\n' }
+    expect(function() site.load(toml) end).toThrow 'bad.md: unterminated TOML frontmatter'
+    expect(function() site.load(yaml) end).toThrow 'bad.md: unterminated YAML frontmatter'
+    expect(function() site.load(empty) end).toThrow 'bad.md: unterminated TOML frontmatter'
+  end)
+
+  suite.it('raises on a link, a data file or a shortcode that is not there, naming the item', function()
+    local link = smallSite { ['templates/index.html'] = '{{ get_url(path="@/nope.md") }}' }
+    local data = smallSite { ['templates/page.html'] = '{{ load_data(path="data/x.json") }}' }
+    local format = smallSite { ['templates/page.html'] = '{{ load_data(path="data/x.csv") }}', ['data/x.csv'] = 'a,b\n' }
+    local shortcode = smallSite { ['content/page.md'] = '+++\n\n+++\n\n{{ nope(value=1) }}\n' }
+    expect(function() site.build(link, `{link}/public`) end).toThrow 'section _index.md: template expression [get_url(path="@/nope.md")]: get_url: unknown content path @/nope.md'
+    expect(function() site.build(data, `{data}/public`) end).toThrow 'page page.md: template expression [load_data(path="data/x.json")]: load_data: data/x.json does not exist'
+    expect(function() site.build(format, `{format}/public`) end).toThrow 'page page.md: template expression [load_data(path="data/x.csv")]: load_data: unsupported format csv'
+    expect(function() site.load(shortcode) end).toThrow 'shortcodes/nope.html: file does not exist'
+  end)
+
+  suite.it('refuses a search index format it does not write', function()
+    local root = smallSite { ['config.toml'] = 'base_url = "https://small.test"\nbuild_search_index = true\n' }
+    expect(function() site.build(root, `{root}/public`) end).toThrow 'site.jpk currently supports search.index_format = "fuse_json"; got elasticlunr_javascript'
+  end)
+end)
+
+return suite

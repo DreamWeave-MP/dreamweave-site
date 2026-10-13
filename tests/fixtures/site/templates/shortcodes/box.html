@@ -1,0 +1,1 @@
+<div class="box {{ kind | default(value="info") }}"><strong>{{ title }}</strong>{{ body | markdown | safe }}<span>{{ body | trim | markdown(inline=true) | safe }}</span></div>

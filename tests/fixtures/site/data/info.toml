@@ -1,0 +1,5 @@
+name = "info"
+version = 3
+
+[nested]
+flag = true

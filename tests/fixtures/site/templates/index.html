@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ section.title }} | {{ config.title }}{% endblock title %}
+{% block content %}
+<article class="home">
+{{ section.content | safe }}
+<p>{{ section.word_count }} words, {{ section.reading_time }} min</p>
+{% set data = load_data(path="data/menu.json") -%}
+<ul>
+{% for entry in data.entries -%}
+  {% if entry.hidden %}{% continue %}{% endif -%}
+  {% if entry.name == "stop" %}{% break %}{% endif -%}
+  <li>{{ entry.name }}: {{ entry.weight * 2 + 1 }}{% if entry.note is defined and entry.note %} ({{ entry.note }}){% endif %}</li>
+{% endfor -%}
+</ul>
+{% set info = load_data(path="data/info.toml") -%}
+<p>{{ info.name }} {{ info.version }} {{ info.nested.flag }}</p>
+{% set list = load_data(path="data/list.yaml") -%}
+<p>{{ list.items | join(sep="/") }}</p>
+{% set plain = load_data(path="data/plain.txt") -%}
+<pre>{{ plain }}</pre>
+{% set again = load_data(path="data/plain.txt", format="plain") -%}
+<pre>{{ again | trim }}</pre>
+{% set absent = load_data(path="data/absent.json", required=false) -%}
+<p>absent: {% if absent %}yes{% else %}no{% endif %}</p>
+{% set literal = load_data(literal='{"a": null, "b": [1, 2.5, "x"], "c": {"k": true}}', format="json") -%}
+<p>{{ literal.b | length }} {{ literal.b | last }} {{ literal.c.k }} [{{ literal.a }}] {% if literal.a %}set{% else %}null{% endif %}</p>
+<p>{{ helpers::tree(depth=0) }}</p>
+</article>
+{% endblock content %}
+{% block footer %}{{ super() }} + {{ helpers::stamp(label="home", suffix="?") }}{% endblock footer %}

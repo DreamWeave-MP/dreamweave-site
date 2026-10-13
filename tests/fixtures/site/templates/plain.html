@@ -1,0 +1,65 @@
+{% import "macros/helpers.html" as helpers -%}
+{% set words = "delta,alpha,charlie,bravo" | split(pat=",") -%}
+{% set guide = get_section(path="guide/_index.md") -%}
+{% set first = get_page(path="guide/first.md") -%}
+{% set_global counter = 10 -%}
+<h1>{{ page.title }}</h1>
+<ul class="filters">
+<li>safe: {{ "<b>&</b>" | safe }} / plain: {{ "<b>&</b>" }} / escape: {{ "<i>'x'</i>" | escape }} / xml: {{ "a&b" | escape_xml }}</li>
+<li>default: {{ missing | default(value="fallback") }} {{ page.title | default(value="unused") }} {{ missing.deeper.still | default(value=7) }}</li>
+<li>length: {{ words | length }} {{ "hello" | length }} {{ 5 | length }} {{ guide.pages | length }}</li>
+<li>pluralize: {{ 1 | pluralize }}|{{ 2 | pluralize }}|{{ "1" | pluralize }}</li>
+<li>case: {{ "mixed Case" | capitalize }} {{ "MiXed" | lower }} {{ "MiXed" | upper }}</li>
+<li>trim: [{{ "  both  " | trim }}] [{{ "  start" | trim_start }}] [{{ "end  " | trim_end }}] [{{ "--dashed-" | trim_start_matches(pat="-") }}]</li>
+<li>replace: {{ "a.b.c (x) 100%" | replace(from=".", to="%") | replace(from="(x)", to="[y]") }}</li>
+<li>split/join: {{ words | join(sep="+") }} {{ "abc" | split(pat="") | join(sep="-") }} {{ words | join }}</li>
+<li>ends: {{ words | first }} {{ words | last }} [{{ [] | first }}] [{{ "text" | last }}]</li>
+<li>reverse: {{ words | reverse | join(sep=",") }}</li>
+<li>sort: {{ words | sort | join(sep=",") }} {{ config.extra.numbers | sort | join(sep=",") }} {{ guide.pages | sort(attribute="title") | map(attribute="title") | join(sep=",") }}</li>
+<li>slice: {{ words | slice(start=1, end=3) | join(sep=",") }} {{ words | slice(end=-1) | join(sep=",") }} {{ words | slice(start=-2) | join(sep=",") }} {{ words | slice(start=2, end=99) | join(sep=",") }}</li>
+<li>concat: {{ words | concat(with=["echo", "foxtrot"]) | join(sep=",") }} {{ words | concat(with="golf") | length }}</li>
+<li>filter: {{ guide.pages | filter(attribute="draft", value=true) | map(attribute="title") | join(sep=",") }} / {{ guide.pages | filter(attribute="date") | map(attribute="slug") | join(sep=",") }} / {{ [0, 1, "", "x"] | filter | length }}</li>
+<li>map: {{ guide.pages | map(attribute="weight") | join(sep=",") }} {{ guide.pages | map(attribute="nope") | length }}</li>
+<li>group_by:{% for weight, group in guide.pages | group_by(attribute="weight") %} {{ weight }}={{ group | map(attribute="slug") | join(sep="+") }}{% endfor %}</li>
+<li>get: {{ first | get(key="title") }} [{{ first | get(key="nope") }}] {{ first.extra | get(key="level") }}</li>
+<li>truncate: {{ "a long sentence to cut" | truncate(length=10) }} {{ "short" | truncate(length=10) }} {{ "abcdefghij" | truncate(length=4, end="..") }}</li>
+<li>striptags: {{ "<p>para <b>bold</b></p>" | striptags }}</li>
+<li>json: {{ words | json_encode | safe }} {{ first.taxonomies | json_encode }} {{ "q\"uote" | json_encode | safe }}</li>
+<li>int: {{ "42.9" | int }} {{ 7.5 | int }} {{ "x" | int }}</li>
+<li>filesize: {{ 512 | filesizeformat }} {{ 2048 | filesizeformat }} {{ 5242880 | filesizeformat }} {{ 3221225472 | filesizeformat }}</li>
+<li>slugify: {{ "Hello, Wörld & Co. -- v1.2_x~y" | slugify }}</li>
+<li>markdown: {{ "*inline* `md`" | markdown(inline=true) }} {{ "# Block" | markdown | safe }}</li>
+<li>date: {{ first.date | date(format="%Y-%m-%d") }}</li>
+</ul>
+<ul class="tests">
+<li>defined: {% if page is defined %}y{% else %}n{% endif %}{% if missing is defined %}y{% else %}n{% endif %}{% if missing is undefined %}y{% else %}n{% endif %}{% if page is not defined %}y{% else %}n{% endif %}</li>
+<li>starting/ending: {% if page.title is starting_with("Be") %}y{% else %}n{% endif %}{% if page.title is ending_with("ta") %}y{% else %}n{% endif %}{% if page.title is starting_with("x") %}y{% else %}n{% endif %}{% if 5 is ending_with("5") %}y{% else %}n{% endif %}</li>
+<li>matching: {% if page.title is matching("^B[a-z]+$") %}y{% else %}n{% endif %}{% if page.title is matching("^\d+$") %}y{% else %}n{% endif %}</li>
+<li>containing: {% if page.title is containing("et") %}y{% else %}n{% endif %}{% if words is containing("alpha") %}y{% else %}n{% endif %}{% if words is containing("omega") %}y{% else %}n{% endif %}{% if 3 is containing(3) %}y{% else %}n{% endif %}</li>
+<li>parity: {% if 4 is even %}y{% else %}n{% endif %}{% if 4 is odd %}y{% else %}n{% endif %}{% if "x" is even %}y{% else %}n{% endif %}</li>
+<li>types: {% if "s" is string %}y{% else %}n{% endif %}{% if 1 is number %}y{% else %}n{% endif %}{% if words is iterable %}y{% else %}n{% endif %}{% if 1 is iterable %}y{% else %}n{% endif %}{% if "1" is number %}y{% else %}n{% endif %}</li>
+</ul>
+<ul class="expressions">
+<li>math: {{ 1 + 2 * 3 }} {{ (1 + 2) * 3 }} {{ 7 / 2 }} {{ 7 // 2 }} {{ 7 % 3 }} {{ -3 + 1 }} {{ 2 - -2 }} {{ "4" + 1 }} {{ "x" * 2 }} {{ 1 / missing }} {{ 1.5 + 1.25 }}</li>
+<li>concat: {{ "a" ~ 1 ~ true ~ missing ~ "z" }} {{ "n=" ~ words | length }}</li>
+<li>compare: {{ 1 == 1 }} {{ 1 != 1 }} {{ 2 > 1 }} {{ 2 < 1 }} {{ 2 >= 2 }} {{ 1 <= 0 }} {{ "a" < "b" }} {{ "a" == 'a' }}</li>
+<li>logic: {{ true and false }} {{ true or false }} {{ not true }} {{ not missing }} {{ "" or "fallback" }} {{ "kept" and "second" }} {{ 0 or 3 }} {{ [] or "empty" }} {{ none or "none" }} {{ null and "x" }}[{{ false and "x" }}]</li>
+<li>membership: {{ "alpha" in words }} {{ "omega" in words }} {{ "omega" not in words }} {{ "ell" in "hello" }} {{ 2 in config.extra.numbers }} {{ "title" in first }}</li>
+<li>index: {{ words[0] }}|{{ words[1] }}|{{ first["title"] }}|{{ first.extra["level"] }}|{{ [10, 20, 30][2] }}|{{ words[9] }}</li>
+<li>strings: {{ 'single "quoted"' }} {{ "tab\there" }} {{ "back\\slash" }} {{ "new\nline" | replace(from="\n", to="/") }}</li>
+<li>range:{% for value in range(end=3) %} {{ value }}{% endfor %} /{% for value in range(start=1, end=8, step_by=3) %} {{ value }}{% endfor %} /{% for value in range(start=2, end=2) %} {{ value }}{% else %} empty{% endfor %}</li>
+<li>pairs:{% for key, value in first.extra %} {{ key }}={{ value }}{% endfor %} /{% for index, word in words %} {{ index }}:{{ word }}{% endfor %}</li>
+<li>scope: {% set inner = 1 %}{% for value in range(end=3) %}{% set inner = inner + value %}{% set_global counter = counter + value %}{% endfor %}{{ inner }} {{ counter }}</li>
+<li>control:{% for value in range(end=9) %}{% if value == 1 %}{% continue %}{% elif value == 4 %}{% break %}{% endif %} {{ value }}{% endfor %}</li>
+<li>loop:{% for word in words %} {{ loop.index }}/{{ loop.length }}{% if loop.first %}F{% endif %}{% if loop.last %}L{% endif %}{% endfor %}</li>
+<li>macros: {{ helpers::link(url="@/guide/first.md#frag", label="<First>") }} {{ helpers::link(url="#top") }} {{ helpers::stamp(label="x") }} {{ helpers::tree(depth=1, limit=4) }}</li>
+<li>urls: {{ get_url(path="a/b") }} {{ get_url(path="a/b", trailing_slash=true) }} {{ get_url(path="a/b/", trailing_slash=false) }} {{ get_url(path="a/file.txt", trailing_slash=true) }} {{ get_url(path="/a?b=1", trailing_slash=true) }} {{ get_url(path="https://x.test/y", cachebust=true) }} {{ get_url(path="@/guide/_index.md") }} {{ get_url(path="humans.txt", cachebust=true) }} {{ get_url(path="nothing.txt", cachebust=true) }}</li>
+<li>taxonomy: {{ get_taxonomy_url(kind="tags", name="Deep Dive") }} {{ get_taxonomy_url(kind="tags") }} {{ get_taxonomy_url() }}</li>
+{% set image = resize_image(path="static/css/site.css", width=120) -%}
+{% set tall = resize_image(path="content/guide/notes.txt", height=50, op="fit_height") -%}
+{% set none_given = resize_image(path="missing.png") -%}
+<li>image: {{ image.url }} {{ image.width }}x{{ image.height }} / {{ tall.url }} {{ tall.width }}x{{ tall.height }} / {{ none_given.url }} {{ none_given.width }}x{{ none_given.height }}</li>
+<li>page: {{ get_page(path="guide/second.md") | get(key="title") }} [{{ get_page(path="nope.md") }}] {{ first.parent.title }} {{ first.colocated_path }} {{ page.colocated_path }} {{ page.source_path }} {{ page.relative_path }}</li>
+<li>values: {{ true }} {{ false }} [{{ none }}] {{ 1.0 }} {{ 0.5 }} {{ 1000000 }}</li>
+</ul>
+{{ page.content | safe }}

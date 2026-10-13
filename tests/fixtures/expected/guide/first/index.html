@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>First steps | Fixture &amp; Sons</title>
+<meta name="description" content="A fixture site, &lt;small&gt; but &quot;complete&quot;">
+<link rel="stylesheet" href="https://example.test/docs/main.css">
+<link rel="stylesheet" href="https://example.test/docs/css/site.css?h=eac0e790573f">
+<script src="https://example.test/docs/js/app.js?v=1"></script>
+<link rel="canonical" href="https://example.test/docs/guide/first/">
+</head>
+<body>
+<nav>
+<a href="https://example.test/docs/">Home</a>
+<a href="https://example.test/docs/guide/">Guide</a>
+<a href="https://elsewhere.test/" rel="last">Elsewhere</a>
+<ol>
+<li data-index="1" data-index0="0" class="first"><a href="https://example.test/docs/guide/">Guide</a> (6 pages)</li>
+<li data-index="2" data-index0="1" class="last"><a href="https://example.test/docs/news/">News</a> (2 pages)</li>
+</ol>
+</nav>
+
+<main>
+<article>
+<h1>First steps</h1>
+<p class="lead">Start &lt;here&gt; &amp; now</p>
+<time datetime="2024-03-01">2024-03-01</time>
+
+<ul class="tags">
+<li><a href="https://example.test/docs/tags/deep-dive/">Deep Dive</a></li><li><a href="https://example.test/docs/tags/intro/">Intro</a></li>
+</ul>
+
+<p class="trail">Welcome / Guide / first</p>
+<p>The summary paragraph, before the fold.</p>
+<!-- more -->
+<h1 id="first-heading">First heading<a class="zola-anchor" href="#first-heading" aria-label="Anchor link for: First heading">§</a></h1>
+<h2 id="second-heading-with-marks">Second <code>heading</code> with <em>marks</em><a class="zola-anchor" href="#second-heading-with-marks" aria-label="Anchor link for: Second `heading` with *marks*">§</a></h2>
+<h3 id="second-heading-with-marks-2">Second heading with marks<a class="zola-anchor" href="#second-heading-with-marks-2" aria-label="Anchor link for: Second heading with marks">§</a></h3>
+<p>Intra<em>word_underscores stay, </em>emphasis<em> does not, </em><em>strong</em><em> too, and snake<em>case</em>name survives.
+A hard break follows<br>
+after two spaces. Escapes: * \</em> # &lt; and a lone \ backslash.</p>
+<p>Auto link <a href="https://example.test/auto">https://example.test/auto</a> and raw <span class="x">html</span> inline, an unclosed &lt; bracket.</p>
+<p><img src="pictures/one.png" alt="An image" title="Titled"> and <img src="https://example.test/docs/guide/deep/beta/" alt="plain"> and <a href="https://example.test/a_(b)">a (nested) link</a>.</p>
+<ul>
+<li>one</li>
+<li>two with <code>code</code></li>
+<li>three</li>
+</ul>
+<ol>
+<li>first</li>
+<li>second</li>
+</ol>
+<ul>
+<li>plus list</li>
+</ul>
+<ul>
+<li>deeper item</li>
+</ul>
+<blockquote>
+<p>A quote
+over two lines</p>
+<ul>
+<li>with a list</li>
+</ul>
+</blockquote>
+<table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td><code>a</code></td><td>1 \</td><td>2</td></tr><tr><td>b</td><td><em>two</em></td></tr></tbody></table>
+<pre><code class="language-luau">local value = &#x27;&lt;&amp;&gt;&#x27;
+print(value)
+</code></pre>
+<pre><code>tilde fence
+</code></pre>
+<hr>
+<div class="raw">
+  <b>kept</b> as is
+</div>
+<p>Unclosed `code and *emphasis and [link](nowhere and ![image](nowhere.</p>
+<div class="note level-3">Second shortcode, with (parens) and a, comma on First steps</div>
+<p>Final paragraph &amp; an ampersand.</p>
+
+<aside><p>The summary paragraph, before the fold.</p>
+</aside>
+<nav class="toc">
+<a class="h1" href="#first-heading">First heading</a>
+<a class="h2" href="#second-heading-with-marks">Second heading with marks</a>
+<a class="h3" href="#second-heading-with-marks-2">Second heading with marks</a>
+</nav>
+<p>117 words, 1 min, Ada &amp; Grace</p>
+</article>
+</main>
+<footer><em>Beginner</em></footer>
+</body>
+</html>

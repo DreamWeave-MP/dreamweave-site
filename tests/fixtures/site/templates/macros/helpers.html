@@ -1,0 +1,8 @@
+{% macro link(url, label="untitled", last=false) -%}
+<a href="{{ get_url(path=url) }}"{% if last %} rel="last"{% endif %}>{{ label }}</a>
+{%- endmacro link %}
+{% macro stamp(label, suffix="!") -%}
+<small>{{ label | upper }}{{ suffix }} {{ helpers::badge(text=label ~ "-" ~ suffix) }}</small>
+{%- endmacro stamp %}
+{% macro badge(text) %}<b class="badge">{{ text }}</b>{% endmacro badge %}
+{% macro tree(depth, limit=3) %}{% if depth < limit %}[{{ depth }}{{ helpers::tree(depth=depth + 1, limit=limit) }}]{% endif %}{% endmacro tree %}

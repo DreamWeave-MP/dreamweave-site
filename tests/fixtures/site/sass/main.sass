@@ -1,0 +1,64 @@
+// A line comment, dropped.
+@import 'parts/colors'
+@import "parts/mixins";
+@import url('https://fonts.test/font.css')
+@import 'theme.css'
+
+$gap: 8px
+$font-stack: 'Fixture Sans', sans-serif
+
+:root
+  --accent: #{$accent}
+  --mixed: #{mix($accent, $ink, 25%)}
+  --faded: #{rgba($accent, 0.5)}
+  --gap: $gap
+
+@font-face
+  font-family: 'Fixture Sans'
+  src: url('fonts/fixture.woff2') format('woff2')
+  font-display: swap
+
+body
+  margin: 0
+  font-family: $font-stack
+  color: $ink
+  background: mix($paper, $ink)
+
+.card,
+.panel,
+.tile
+  padding: $gap
+  border: 1px solid rgba($ink, 0.25)
+  +rounded
+  &:hover
+    border-color: $accent
+  .title
+    font-weight: bold
+    +shadow(4px, $color: #000)
+    &.large, & > small
+      font-size: 2em
+  a, button
+    color: $accent
+
+.message
+  padding: $gap
+  color: $ink
+
+.error
+  @extend .message
+  color: #f00
+
+.error.fatal
+  @extend .error
+  font-weight: bold
+
+@media (min-width: 600px)
+  .card
+    padding: $gap $gap
+    $gap: 16px
+    margin: $gap
+  +rounded(2px)
+
+.unknown-variable
+  width: $nope
+  height: calc(100% - #{$gap})

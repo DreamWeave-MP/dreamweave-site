@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel>
+<title>Fixture &amp; Sons</title>
+<link>https://example.test/docs</link>
+<description>A fixture site, &lt;small&gt; but &quot;complete&quot;</description>
+<generator>Zola</generator>
+<language>en</language>
+<atom:link href="https://example.test/docs/rss.xml" rel="self" type="application/rss+xml"/>
+<item><title>News two</title><pubDate>2025-06-07 00:00:00 +0000</pubDate><author>The Fixture Author</author><link>https://example.test/docs/news/two/</link><guid>https://example.test/docs/news/two/</guid><description xml:base="https://example.test/docs/news/two/">&lt;p&gt;Summary of the newer news.&lt;/p&gt;
+&lt;!--more--&gt;
+&lt;p&gt;The rest of it.&lt;/p&gt;
+</description></item>
+<item><title>Second thoughts</title><pubDate>2025-01-15 00:00:00 +0000</pubDate><author>The Fixture Author</author><link>https://example.test/docs/guide/second/</link><guid>https://example.test/docs/guide/second/</guid><description xml:base="https://example.test/docs/guide/second/">&lt;p&gt;Second page, with YAML frontmatter and a link to &lt;a href=&quot;https://example.test/docs/guide/&quot;&gt;the guide&lt;/a&gt; and &lt;a href=&quot;https://example.test/docs/guide/first/&quot;&gt;first&lt;/a&gt;.&lt;/p&gt;
+&lt;h2 id=&quot;a-heading&quot;&gt;A heading&lt;a class=&quot;zola-anchor&quot; href=&quot;#a-heading&quot; aria-label=&quot;Anchor link for: A heading&quot;&gt;§&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id=&quot;a-heading-2&quot;&gt;A heading&lt;a class=&quot;zola-anchor&quot; href=&quot;#a-heading-2&quot; aria-label=&quot;Anchor link for: A heading&quot;&gt;§&lt;/a&gt;&lt;/h2&gt;
+&lt;h2 id=&quot;a-heading-3&quot;&gt;A   heading!&lt;a class=&quot;zola-anchor&quot; href=&quot;#a-heading-3&quot; aria-label=&quot;Anchor link for: A   heading!&quot;&gt;§&lt;/a&gt;&lt;/h2&gt;
+&lt;p&gt;Words words words.&lt;/p&gt;
+</description></item>
+<item><title>First steps</title><pubDate>2024-03-01 00:00:00 +0000</pubDate><author>Ada</author><link>https://example.test/docs/guide/first/</link><guid>https://example.test/docs/guide/first/</guid><description xml:base="https://example.test/docs/guide/first/">&lt;p&gt;The summary paragraph, before the fold.&lt;/p&gt;
+</description></item>
+<item><title>News one</title><pubDate>2024-01-05 00:00:00 +0000</pubDate><author>The Fixture Author</author><link>https://example.test/docs/news/one/</link><guid>https://example.test/docs/news/one/</guid><description xml:base="https://example.test/docs/news/one/">&lt;p&gt;Old news.&lt;/p&gt;
+</description></item>
+</channel></rss>

@@ -1,0 +1,1 @@
+{"entries": [{"name": "one", "weight": 1}, {"name": "two", "weight": 2.5, "note": "a <note>"}, {"name": "three", "weight": 3, "hidden": true}, {"name": "four", "weight": 4, "note": ""}, {"name": "stop", "weight": 5}, {"name": "five", "weight": 6}]}

@@ -1,0 +1,59 @@
+<h1>Beta</h1>
+<ul class="filters">
+<li>safe: <b>&</b> / plain: &lt;b&gt;&amp;&lt;/b&gt; / escape: &lt;i&gt;&#x27;x&#x27;&lt;/i&gt; / xml: a&amp;b</li>
+<li>default: fallback Beta 7</li>
+<li>length: 4 5 0 6</li>
+<li>pluralize: |s|</li>
+<li>case: Mixed Case mixed MIXED</li>
+<li>trim: [both] [start] [end] [dashed-]</li>
+<li>replace: a%b%c [y] 100%</li>
+<li>split/join: delta+alpha+charlie+bravo a-b-c deltaalphacharliebravo</li>
+<li>ends: delta bravo [] []</li>
+<li>reverse: bravo,charlie,alpha,delta</li>
+<li>sort: alpha,bravo,charlie,delta 1,2,3 First steps,Hidden draft,Moved,Quiet,Second thoughts,Unrendered</li>
+<li>slice: alpha,charlie delta,alpha,charlie charlie,bravo charlie,bravo</li>
+<li>concat: delta,alpha,charlie,bravo,echo,foxtrot 5</li>
+<li>filter: Hidden draft / second,first / 2</li>
+<li>map: 1,2,3,4,5,9 6</li>
+<li>group_by: 1=second 2=first 3=quiet-slug 4=moved 5=unrendered 9=hidden</li>
+<li>get: First steps [] beginner</li>
+<li>truncate: a long … short ab..</li>
+<li>striptags: para bold</li>
+<li>json: ["delta","alpha","charlie","bravo"] {&quot;tags&quot;:[&quot;Intro&quot;,&quot;Deep Dive&quot;]} "q\"uote"</li>
+<li>int: 42 7 0</li>
+<li>filesize: 512 B 2.0 kB 5.0 MB 3.0 GB</li>
+<li>slugify: hello-w-rld-co.-v1.2_x~y</li>
+<li>markdown: <em>inline</em> <code>md</code> <h1 id="block">Block</h1>
+</li>
+<li>date: 2024-03-01</li>
+</ul>
+<ul class="tests">
+<li>defined: ynyy</li>
+<li>starting/ending: yynn</li>
+<li>matching: yn</li>
+<li>containing: yynn</li>
+<li>parity: yny</li>
+<li>types: yyynn</li>
+</ul>
+<ul class="expressions">
+<li>math: 7 9 3.5 3 1 -2 4 5 0 1 2.75</li>
+<li>concat: a1truez n=4</li>
+<li>compare: true false true false true false true true</li>
+<li>logic: false true false true fallback second 3 empty none [false]</li>
+<li>membership: true false true true true true</li>
+<li>index: |delta|First steps|beginner|20|</li>
+<li>strings: single &quot;quoted&quot; tab	here back\slash new/line</li>
+<li>range: 0 1 2 / 1 4 / empty</li>
+<li>pairs: level=beginner / 1:delta 2:alpha 3:charlie 4:bravo</li>
+<li>scope: 1 13</li>
+<li>control: 0 2 3</li>
+<li>loop: 1/4F 2/4 3/4 4/4L</li>
+<li>macros: <a href="https://example.test/docs/guide/first/#frag">&lt;First&gt;</a> <a href="#top">untitled</a> <small>X! <b class="badge">x-!</b></small> [1[2[3]]]</li>
+<li>urls: https://example.test/docs/a/b https://example.test/docs/a/b/ https://example.test/docs/a/b https://example.test/docs/a/file.txt https://example.test/docs/a?b=1 https://x.test/y https://example.test/docs/guide/ https://example.test/docs/humans.txt?h=11db6e1fe0fe https://example.test/docs/nothing.txt</li>
+<li>taxonomy: https://example.test/docs/tags/deep-dive/ https://example.test/docs/tags/ https://example.test/docs/tags/</li>
+<li>image: https://example.test/docs/css/site.css 120x67 / https://example.test/docs/guide/notes.txt 1x50 / https://example.test/docs/missing.png 1x1</li>
+<li>page: Second thoughts [] Guide guide/ guide/deep/beta/ @/guide/deep/beta/index.md guide/deep/beta/index.md</li>
+<li>values: true false [] 1 0.5 1000000</li>
+</ul>
+<p>A colocated page with an asset.</p>
+
