@@ -73,16 +73,24 @@ local function treeDigest(folder: string): string
   return digest(parts)
 end
 
+--- What a workload returns: a line that says what it did, or the strings it made, which are
+--- digested outside the time.
+type Result = string | { string }
+
+local function describe(result: Result): string
+  return if type(result) == 'table' then digest(result) else result
+end
+
 --- Seconds per call of `body`: warmed up, then the median of seven batches of a size that takes
 --- about a tenth of a second, with a full collection between them. Every checked call must
 --- return what the first did.
-local function measure(name: string, body: () -> string)
+local function measure(name: string, body: () -> Result)
   if only and not string.find(name, only, 1, true) then return end
 
   jess.bench.collect()
-  local first = body()
+  local first = describe(body())
   local start = os.clock()
-  local second = body()
+  local checked = body()
   local once = math.max(os.clock() - start, 1e-7)
   local iterations = math.max(1, math.floor(0.1 / once))
   local samples = {}
@@ -97,7 +105,7 @@ local function measure(name: string, body: () -> string)
     samples[batch] = (os.clock() - start) / iterations
   end
 
-  local last = body()
+  local second, last = describe(checked), describe(body())
   if second ~= first or last ~= first then
     error(`site bench: {name} returned {second} and {last} after {first}`, 0)
   end
@@ -126,7 +134,7 @@ for _, source in sources do
   end
 end
 
-measure('load: scan, shortcodes and markdown', function(): string
+measure('load: scan, shortcodes and markdown', function(): Result
   local fresh = site.load(root)
   local parts = {}
 
@@ -139,10 +147,10 @@ measure('load: scan, shortcodes and markdown', function(): string
     table.insert(parts, page.summary)
   end
 
-  return digest(parts)
+  return parts
 end)
 
-measure('build: the whole site, load to last write', function(): string
+measure('build: the whole site, load to last write', function(): Result
   local report = site.build(root, public, {})
   return `{report.pages} pages, {report.sections} sections, {report.search} indexes`
 end)
@@ -156,21 +164,21 @@ if not only or string.find('build: the whole site, load to last write', only, 1,
   rows[#rows].digest ..= `, tree {built}`
 end
 
-measure('render: every item through its template', function(): string
-  return digest([for entry in rendered => loaded:renderItem(entry.item, entry.isPage) :: string])
+measure('render: every item through its template', function(): Result
+  return [for entry in rendered => loaded:renderItem(entry.item, entry.isPage) :: string]
 end)
 
-measure('markdown: every item\'s source as a document', function(): string
+measure('markdown: every item\'s source as a document', function(): Result
   local options = {
     insertAnchorLinks = 'right',
     resolveLink = function(href: string): string return loaded:resolveContentLink(href) end,
   }
 
-  return digest([for source in sources => markdown.renderDocument(source, options).html :: string])
+  return [for source in sources => markdown.renderDocument(source, options).html :: string]
 end)
 
-measure('markdown: every line as inline text', function(): string
-  return digest([for line in lines => markdown.inline(line) :: string])
+measure('markdown: every line as inline text', function(): Result
+  return [for line in lines => markdown.inline(line) :: string]
 end)
 
 local stylesheets = {}
@@ -180,12 +188,12 @@ for _, entry in util.walk(`{root}/sass`) do
   if string.match(name, '%.s[ac]ss$') and string.sub(name, 1, 1) ~= '_' then table.insert(stylesheets, entry.path) end
 end
 
-measure('sass: every stylesheet, imports expanded', function(): string
-  return digest([for path in stylesheets => sass.compileFile(path) :: string])
+measure('sass: every stylesheet, imports expanded', function(): Result
+  return [for path in stylesheets => sass.compileFile(path) :: string]
 end)
 
-measure('search: clean every body and encode the index', function(): string
-  return digest { json.encode(loaded:searchItems(), false) }
+measure('search: clean every body and encode the index', function(): Result
+  return { json.encode(loaded:searchItems(), false) }
 end)
 
 local metadata = json.array()
@@ -209,13 +217,13 @@ for _, entry in items do
   )
 end
 
-measure('json: every item\'s metadata, compact and pretty', function(): string
-  return digest { json.encode(metadata, false), json.encode(metadata) }
+measure('json: every item\'s metadata, compact and pretty', function(): Result
+  return { json.encode(metadata, false), json.encode(metadata) }
 end)
 
 local templates = [for entry in util.walk(`{root}/templates`) => entry.relative :: string]
 
-measure('tera: parse every template', function(): string
+measure('tera: parse every template', function(): Result
   local engine = tera.Engine.new(root, {})
   return `{sum[for name in templates => #engine:parse(name)]} nodes in {#templates} templates`
 end)
@@ -238,7 +246,7 @@ local Expressions = {
   'range(end=8) | filter | length',
 }
 
-measure('expr: fifteen expressions against every item', function(): string
+measure('expr: fifteen expressions against every item', function(): Result
   local parts = {}
 
   for _, entry in items do
@@ -249,29 +257,29 @@ measure('expr: fifteen expressions against every item', function(): string
   end
 
   -- A table's address differs from run to run: only its being one is checked.
-  return digest([for part in parts => if string.sub(part, 1, 7) == 'table: ' then 'table' else part])
+  return [for part in parts => if string.sub(part, 1, 7) == 'table: ' then 'table' else part]
 end)
 
-measure('util: escapeHtml over every line', function(): string
-  return digest([for line in lines => util.escapeHtml(line) :: string])
+measure('util: escapeHtml over every line', function(): Result
+  return [for line in lines => util.escapeHtml(line) :: string]
 end)
 
-measure('util: trim over every line', function(): string
-  return digest([for line in lines => util.trim(line) :: string])
+measure('util: trim over every line', function(): Result
+  return [for line in lines => util.trim(line) :: string]
 end)
 
-measure('util: slugify over every line', function(): string
-  return digest([for line in lines => util.slugify(line) :: string])
+measure('util: slugify over every line', function(): Result
+  return [for line in lines => util.slugify(line) :: string]
 end)
 
-measure('util: split every line on spaces', function(): string
+measure('util: split every line on spaces', function(): Result
   return `{sum[for line in lines => #util.split(line, ' ')]} words`
 end)
 
 local Globs = { '**/*.md', 'docs/**', '**/_index.md', 'docs/*/a?i/*.md', '*.draft.md' }
 local relatives = [for entry in util.walk(`{root}/content`) => entry.relative :: string]
 
-measure('util: five globs against every content path', function(): string
+measure('util: five globs against every content path', function(): Result
   local matched = 0
 
   for _, relative in relatives do
@@ -283,7 +291,7 @@ end)
 
 local content = `{root}/content`
 
-measure('util: walk the content folder', function(): string return `{#util.walk(content)} files` end)
+measure('util: walk the content folder', function(): Result return `{#util.walk(content)} files` end)
 
 for _, row in rows do
   print(`# {row.name}: {row.digest}`)
