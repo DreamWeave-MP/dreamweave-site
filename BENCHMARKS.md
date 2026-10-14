@@ -1,6 +1,6 @@
 # Site generator benchmarks
 
-`bench/bench.luau` times the package through what it exports: loading a site (scan, shortcodes,
+`bench/bench.jsl` times the package through what it exports: loading a site (scan, shortcodes,
 Markdown), the whole build from load to the last file written, and each stage on its own over the
 same site's text. Each workload is warmed up, sized to a batch of about a tenth of a second, and
 reported as the median of seven batches, with a full collection between them. Every call of a
@@ -12,7 +12,7 @@ suite pins.
 ```sh
 jess run --package jpk/dreamweave-site --package-path jpk \
   --capability filesystem.read --capability filesystem.write \
-  jpk/dreamweave-site/bench/bench.luau <scratch folder> [site root] [filter]
+  jpk/dreamweave-site/bench/bench.jsl <scratch folder> [site root] [filter]
 ```
 
 ## The move onto l3i 2.0, base against head
@@ -50,7 +50,7 @@ jess run --package jpk/dreamweave-site --package-path jpk \
 | util: walk the content folder | 0.640 | 0.652 | no change |
 | `jess run` of the whole build, cold | 675.7 | 483.7 | 1.40x |
 
-The last row is not the bench's: it is `jess run tools/site/build.luau site <scratch>` as
+The last row is not the bench's: it is `jess run tools/site/build.jsl site <scratch>` as
 `buildSite` runs it, process start to exit, the median of seven runs a side, alternating, under the
 same lock.
 

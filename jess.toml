@@ -5,16 +5,16 @@ id = "org.dreamweave.site"
 version = "0.1.0"
 jess_api = "1"
 include = ["src"]
-tests = ["tests/run.luau"]
+tests = ["tests/run.jsl"]
 
 [modules]
-"@dreamweave/site/util" = "src/util.luau"
-"@dreamweave/site/json" = "src/json.luau"
-"@dreamweave/site/expr" = "src/expr.luau"
-"@dreamweave/site/tera" = "src/tera.luau"
-"@dreamweave/site/markdown" = "src/markdown.luau"
-"@dreamweave/site/sass" = "src/sass.luau"
-"@dreamweave/site" = "src/site.luau"
+"@dreamweave/site/util" = "src/util.jsl"
+"@dreamweave/site/json" = "src/json.jsl"
+"@dreamweave/site/expr" = "src/expr.jsl"
+"@dreamweave/site/tera" = "src/tera.jsl"
+"@dreamweave/site/markdown" = "src/markdown.jsl"
+"@dreamweave/site/sass" = "src/sass.jsl"
+"@dreamweave/site" = "src/site.jsl"
 
 [[layer]]
 id = "dreamweave.site"

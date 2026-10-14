@@ -3,7 +3,7 @@
 -- The site generator, timed from Luau through what it exports: loading a site (scan, shortcodes,
 -- Markdown), the whole build to the last file written, and each stage on its own over the same
 -- site's text. Run by `jess run --capability filesystem.read --capability filesystem.write
--- --package . bench/bench.luau <scratch folder> [site root] [filter]`, on a release build. With
+-- --package . bench/bench.jsl <scratch folder> [site root] [filter]`, on a release build. With
 -- no site root it builds the suite's fixture site, and checks the build against the tree the
 -- suite pins.
 --
