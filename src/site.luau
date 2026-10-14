@@ -36,6 +36,7 @@ function Site.new(root,options)
     options=options or {}
     local configPath=jess.fs.isFile(jess.fs.join(root,'config.toml')) and jess.fs.join(root,'config.toml') or jess.fs.join(root,'zola.toml')
     local config=decodeToml(Util.readRequired(configPath));config.extra=config.extra or {};config.markdown=config.markdown or {};config.default_language=config.default_language or 'en';config.title=config.title or 'Site';config.description=config.description or ''
+    if options.baseUrl then config.base_url=options.baseUrl end
     if options.offline then config.build_search_index=false;config.generate_feeds=false;config.feed_filenames=nil;config.extra.dreamweave_offline=true end
     local self=setmetatable({root=root,config=config,pages={},sections={},pagesBySource={},sectionsBySource={},taxonomies={},options=options,dataCache={},ignoreCache={}},Site)
     self.engine=Tera.Engine.new(root,{markdown=Markdown,site=self})
