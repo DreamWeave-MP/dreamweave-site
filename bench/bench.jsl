@@ -12,6 +12,7 @@
 -- start with `#`, so two runs over one site can be told to have done the same work.
 local bytes = require '@dream/bytes'
 local expr = require '@dreamweave/site/expr'
+local fs = require '@dream/fs'
 local json = require '@dreamweave/site/json'
 local markdown = require '@dreamweave/site/markdown'
 local sass = require '@dreamweave/site/sass'
@@ -67,7 +68,9 @@ local function treeDigest(folder: string): string
   local parts = {}
   for _, entry in util.walk(folder) do
     table.insert(parts, entry.relative)
-    table.insert(parts, assert(jess.fs.read(entry.path)))
+    local fileText, problem = fs.readFileString(entry.path)
+    if not fileText then error(problem, 0) end
+    table.insert(parts, fileText)
   end
 
   return digest(parts)
@@ -184,7 +187,7 @@ end)
 local stylesheets = {}
 
 for _, entry in util.walk(`{root}/sass`) do
-  local name = jess.fs.fileName(entry.relative)
+  local name = fs.fileName(entry.relative)
   if string.match(name, '%.s[ac]ss$') and string.sub(name, 1, 1) ~= '_' then table.insert(stylesheets, entry.path) end
 end
 

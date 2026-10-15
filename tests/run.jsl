@@ -6,6 +6,7 @@
 -- cases around it pin each module's own contract and the text of every error. Sites and
 -- templates the cases make go under the folder the harness names as `scratchRoot`.
 local expr = require '@dreamweave/site/expr'
+local fs = require '@dream/fs'
 local jessJson = require '@jess/json'
 local json = require '@dreamweave/site/json'
 local markdown = require '@dreamweave/site/markdown'
@@ -34,7 +35,8 @@ local made = 0
 local function tree(files: { [string]: string }): string
   made += 1
   local root = `{scratchRoot}/tree-{made}`
-  jess.fs.createDir(root)
+  local done, problem = fs.mkdir(root, { recursive = true })
+  if not done then error(problem, 0) end
 
   for name, contents in files do
     util.write(`{root}/{name}`, contents)
@@ -53,8 +55,10 @@ local function sameTree(built: string, pinned: string)
   expect(relatives(built)).toEqual(relatives(pinned))
 
   for _, entry in util.walk(pinned) do
-    local wanted = assert(jess.fs.read(entry.path))
-    local got = assert(jess.fs.read(`{built}/{entry.relative}`))
+    local wanted, problem = fs.readFileString(entry.path)
+    if not wanted then error(problem, 0) end
+    local got, problem = fs.readFileString(`{built}/{entry.relative}`)
+    if not got then error(problem, 0) end
     if got == wanted then continue end
 
     local offset = 1
@@ -193,7 +197,7 @@ suite.describe('util', function()
   suite.it('walks a folder in name order, and writes and copies below folders it makes', function()
     local root = tree { ['b.txt'] = 'b', ['a/z.txt'] = 'z', ['a/c/d.txt'] = 'd', ['B.txt'] = 'B' }
     expect(relatives(root)).toEqual { 'B.txt', 'a/c/d.txt', 'a/z.txt', 'b.txt' }
-    expect(util.walk(root)[2].path).toBe(jess.fs.join(jess.fs.join(jess.fs.join(root, 'a'), 'c'), 'd.txt'))
+    expect(util.walk(root)[2].path).toBe(fs.join(fs.join(fs.join(root, 'a'), 'c'), 'd.txt'))
     expect(util.walk(`{root}/absent`)).toEqual {}
 
     local kept = { { path = 'kept', relative = 'kept' } }
@@ -202,7 +206,7 @@ suite.describe('util', function()
 
     expect(util.copyTree(root, `{root}-copy/deep`)).toBe(4)
     expect(relatives(`{root}-copy/deep`)).toEqual(relatives(root))
-    expect(jess.fs.read(`{root}-copy/deep/a/c/d.txt`)).toBe 'd'
+    expect(fs.readFileString(`{root}-copy/deep/a/c/d.txt`)).toBe 'd'
     util.copyFile(`{root}/b.txt`, `{root}-copy/other/place/b.txt`)
     expect(util.readRequired(`{root}-copy/other/place/b.txt`)).toBe 'b'
     expect(function() util.readRequired(`{root}/nothing.txt`) end).toThrow(`read {root}/nothing.txt: file does not exist`)
@@ -434,10 +438,10 @@ suite.describe('sass', function()
     expect(function() sass.compileFile(`{root}/loop.sass`) end).toThrow(`sass import cycle: {root}/loop.sass`)
     expect(function() sass.compileFile(`{root}/absent.sass`) end).toThrow(`read {root}/absent.sass: file does not exist`)
 
-    jess.fs.remove(`{root}/loop.sass`)
+    fs.remove(`{root}/loop.sass`)
     expect(sass.compileDirectory(root, `{root}-css`)).toBe(3)
     expect(relatives(`{root}-css`)).toEqual { 'main.css', 'other.css', 'sub/shown.css' }
-    expect(jess.fs.read(`{root}-css/sub/shown.css`)).toBe '.s {\n  top: 2;\n}\n'
+    expect(fs.readFileString(`{root}-css/sub/shown.css`)).toBe '.s {\n  top: 2;\n}\n'
   end)
 end)
 
@@ -564,9 +568,9 @@ suite.describe('site', function()
     expect(report.search).toBe(0)
     expect(report.pages).toBe(12)
     expect(loaded.config.extra.dreamweave_offline).toBe(true)
-    expect(jess.fs.isFile(`{public}/atom.xml`)).toBe(false)
-    expect(jess.fs.isFile(`{public}/search_index.en.json`)).toBe(false)
-    expect(jess.fs.read(`{public}/guide/first/index.html`)).toBe(jess.fs.read(`{expected}/guide/first/index.html`))
+    expect(fs.isFile(`{public}/atom.xml`)).toBe(false)
+    expect(fs.isFile(`{public}/search_index.en.json`)).toBe(false)
+    expect(fs.readFileString(`{public}/guide/first/index.html`)).toBe(fs.readFileString(`{expected}/guide/first/index.html`))
   end)
 
   suite.it('loads sections and pages in path order and connects them', function()
@@ -761,8 +765,8 @@ suite.describe('site', function()
       special = 2,
     }
 
-    expect(jess.fs.read(`{root}/public/robots.txt`)).toBe 'User-agent: *\nDisallow:\nAllow: /\nSitemap: https://bare.test/sitemap.xml\n'
-    expect(jess.fs.read(`{root}/public/sitemap.xml`)).toBe '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n</urlset>\n'
+    expect(fs.readFileString(`{root}/public/robots.txt`)).toBe 'User-agent: *\nDisallow:\nAllow: /\nSitemap: https://bare.test/sitemap.xml\n'
+    expect(fs.readFileString(`{root}/public/sitemap.xml`)).toBe '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n</urlset>\n'
     expect(function() site.load(`{root}/absent`) end).toThrow 'zola.toml: file does not exist'
   end)
 
@@ -770,9 +774,9 @@ suite.describe('site', function()
     local root = smallSite { ['content/some_long-name.md'] = 'No frontmatter at all.\n' }
     local report = site.build(root, `{root}/public`)
     expect(report.pages).toBe(3)
-    expect(jess.fs.read(`{root}/public/index.html`)).toBe '<h1>Root</h1><p>Root body.</p>\n'
-    expect(jess.fs.read(`{root}/public/page/index.html`)).toBe '<h3>Page</h3><p>Page body.</p>\n'
-    expect(jess.fs.read(`{root}/public/some_long-name/index.html`)).toBe '<h3>Some Long Name</h3><p>No frontmatter at all.</p>\n'
+    expect(fs.readFileString(`{root}/public/index.html`)).toBe '<h1>Root</h1><p>Root body.</p>\n'
+    expect(fs.readFileString(`{root}/public/page/index.html`)).toBe '<h3>Page</h3><p>Page body.</p>\n'
+    expect(fs.readFileString(`{root}/public/some_long-name/index.html`)).toBe '<h3>Some Long Name</h3><p>No frontmatter at all.</p>\n'
   end)
 
   suite.it('raises on frontmatter that never ends', function()

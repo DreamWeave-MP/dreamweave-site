@@ -2,6 +2,8 @@ local Util=require './util'
 local Expr=require './expr'
 local JsonOut=require './json'
 local JessJson=require '@jess/json'
+local bytes = require '@dream/bytes'
+local fs = require '@dream/fs'
 local UNDEF=Expr.UNDEF
 local M={}
 
@@ -26,12 +28,14 @@ local function tokenise(text)
         if kind=='text' and content=='' then return end
         table.insert(tokens,{kind=kind,content=content})
     end
+
     while at<=#text do
         local p1=string.find(text,'{{',at,true);local p2=string.find(text,'{%',at,true);local p3=string.find(text,'{#',at,true)
         local start=nil;local kind=nil;local close=nil
         for _,x in ipairs({{p1,'expr','}}'},{p2,'stmt','%}'},{p3,'comment','#}'}}) do
             if x[1] and (not start or x[1]<start) then start=x[1];kind=x[2];close=x[3] end
         end
+
         if not start then
             local tail=string.sub(text,at);if trimNext then tail=string.gsub(tail,'^%s+','');trimNext=false end;push('text',tail);break
         end
@@ -54,7 +58,9 @@ end
 local Parser={};Parser.__index=Parser
 @native
 local function word(s) return string.match(s,'^([%w_]+)') or '' end
+
 function Parser.new(text,name) return setmetatable({tokens=tokenise(text),at=1,name=name},Parser) end
+
 @native
 function Parser:seq(stops)
     local nodes={}
@@ -122,16 +128,19 @@ function Parser:seq(stops)
     end
     return nodes,nil
 end
+
 function Parser:parse() local nodes,stop=self:seq({});if stop then error(`{self.name}: unexpected {stop}`,0) end;return nodes end
 
 local Env={};Env.__index=Env
 function Env.new(engine,globals,parent)
     return setmetatable({engine=engine,globals=globals or {},locals={},parent=parent},Env)
 end
+
 function Env:child() return Env.new(self.engine,self.globals,self) end
 --- What a plain name is bound to in `environment`: its own local, or what its parent answers,
 --- or its global, or one of the engine's functions. A name a parent leaves undefined is still
 --- looked for among this environment's globals and functions.
+
 @native
 local function lookup(environment, name: string)
   local value = rawget(environment.locals, name)
@@ -161,9 +170,11 @@ function Env:get(name: string)
   local member = rawget(space, string.sub(name, separator + 2))
   return if member == nil then UNDEF else member
 end
+
 function Env:set(name,v,global)
     if global then self.globals[name]=v else self.locals[name]=v end
 end
+
 function Env:call(callee,args,named)
     if type(callee)=='table' and rawget(callee,'__dw_callable') then return callee.fn(args,named,self) end
     error('attempt to call a non-callable template value',0)
@@ -173,18 +184,22 @@ local function attr(v,name)
     v=Expr.unwrap(v);if v==UNDEF or v==nil or type(v)~='table' then return UNDEF end
     local x=rawget(v,name);return x==nil and UNDEF or x
 end
+
 local function compareKey(v,attribute)
     if attribute then v=attr(v,attribute) end
     v=Expr.unwrap(v);if v==UNDEF or v==nil then return '' end;return v
 end
+
 local function sortedCopy(items,attribute)
     local out={};for _,v in ipairs(items or {}) do table.insert(out,v) end
+
     table.sort(out,function(a,b)
         local x,y=compareKey(a,attribute),compareKey(b,attribute)
         if type(x)==type(y) and (type(x)=='number' or type(x)=='string') then return x<y end
         return tostring(x)<tostring(y)
     end);return out
 end
+
 local function stripTags(s) return (string.gsub(tostring(s),'<[^>]->','')) end
 
 @native
@@ -231,13 +246,14 @@ function Env:filter(name,value,args,named)
     end
     error(`unsupported template filter: {name}`,0)
 end
+
 function Env:test(name,value,args,named)
     local v=Expr.unwrap(value)
     if name=='defined' then return v~=UNDEF
     elseif name=='undefined' then return v==UNDEF
     elseif name=='starting_with' then return type(v)=='string' and string.sub(v,1,#tostring(args[1] or ''))==tostring(args[1] or '')
     elseif name=='ending_with' then local q=tostring(args[1] or '');return type(v)=='string' and string.sub(v,-#q)==q
-    elseif name=='matching' then local re=jess.regex.new(tostring(args[1] or ''));return re:isMatch(tostring(v or ''))
+    elseif name=='matching' then local re=bytes.regex(tostring(args[1] or ''));return re:isMatch(tostring(v or ''))
     elseif name=='containing' then if type(v)=='string' then return string.find(v,tostring(args[1] or ''),1,true)~=nil elseif type(v)=='table' then for _,x in pairs(v) do if x==args[1] then return true end end end;return false
     elseif name=='even' then return (tonumber(v) or 0)%2==0
     elseif name=='odd' then return (tonumber(v) or 0)%2~=0
@@ -250,24 +266,28 @@ end
 
 local Engine={};Engine.__index=Engine
 local function callable(fn) return {__dw_callable=true,fn=fn} end
+
 function Engine.new(root,options)
     options=options or {}
-    local self=setmetatable({root=root,templateRoot=jess.fs.join(root,options.templateDir or 'templates'),cache={},functions={},markdown=options.markdown,site=options.site},Engine)
+    local self=setmetatable({root=root,templateRoot=fs.join(root,options.templateDir or 'templates'),cache={},functions={},markdown=options.markdown,site=options.site},Engine)
     self.functions.range=callable(function(_,named)
         local start=tonumber(named.start or 0) or 0;local finish=tonumber(named['end'] or 0) or 0;local step=tonumber(named.step_by or 1) or 1;local out={};for i=start,finish-step,step do table.insert(out,i) end;return out
     end)
     self.functions.throw=callable(function(args) error(tostring(args[1] or 'template threw'),0) end)
     return self
 end
+
 function Engine:addFunction(name,fn) self.functions[name]=callable(fn) end
+
 function Engine:parse(name)
     local hit=self.cache[name];if hit then return hit end
-    local path=jess.fs.join(self.templateRoot,name);local text=Util.readRequired(path);local ast=Parser.new(text,name):parse();self.cache[name]=ast;return ast
+    local path=fs.join(self.templateRoot,name);local text=Util.readRequired(path);local ast=Parser.new(text,name):parse();self.cache[name]=ast;return ast
 end
 
 local function collectMacros(nodes,out)
     for _,n in ipairs(nodes) do if n.kind=='macro' then out[n.name]=n end end;return out
 end
+
 local function findExtends(nodes) for _,n in ipairs(nodes) do if n.kind=='extends' then return n.path end end end
 local function collectBlocks(nodes,out) out=out or {};for _,n in ipairs(nodes) do if n.kind=='block' then out[n.name]=n end end;return out end
 
@@ -293,6 +313,7 @@ function Engine:namespace(name,caller)
     end
     return ns
 end
+
 @native
 function Engine:prepare(nodes,env)
     for _,n in ipairs(nodes) do
@@ -302,6 +323,7 @@ end
 --- What a `for` tag walks: the keys and the values of `value`, in step. A table whose keys are
 --- numbers, as many as the greatest of them, is walked in order up to its first gap; any other
 --- by its keys sorted as text; anything that is not a table is empty.
+
 local function iterPairs(value): ({ unknown }, { unknown })
   local keys, values = {}, {}
   if type(value) ~= 'table' then return keys, values end
@@ -426,6 +448,7 @@ function Engine:renderNodes(nodes, environment, blocks): (string, string?)
 
   return table.concat(out), signal
 end
+
 function Engine:renderTemplate(name,envOrVars,overrides)
     local ast=self:parse(name);local env
     if getmetatable(envOrVars)==Env then env=envOrVars:child() else env=Env.new(self,envOrVars or {}) end
@@ -437,6 +460,7 @@ function Engine:renderTemplate(name,envOrVars,overrides)
     end
     local text=self:renderNodes(ast,env,overrides);return text
 end
+
 function Engine:render(name,vars) return self:renderTemplate(name,vars,nil) end
 M.Engine=Engine;M.Env=Env;M.UNDEF=UNDEF
 return M

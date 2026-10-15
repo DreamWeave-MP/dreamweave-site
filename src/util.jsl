@@ -4,6 +4,7 @@
 -- matched against content paths, and files read, walked, written and copied below folders made
 -- as they are needed.
 local bytes = require '@dream/bytes'
+local fs = require '@dream/fs'
 
 export type Entry = { path: string, relative: string }
 
@@ -98,31 +99,19 @@ function util.joinUrl(base: string, path: string): string
   return stem .. '/' .. rest
 end
 
--- Every byte a slug does not keep, and what it becomes: an upper-case letter its lower-case one,
--- anything else outside `[%w._~-]` a dash.
-local SlugFrom, SlugTo = (function(): (string, string)
-  local from, to = {}, {}
+-- Every byte a slug does not keep, and what it becomes: an upper-case letter its lower-case one
+-- (`nocase`), anything else outside `[%w._~-]` a dash.
+local SlugDashes: { [string]: string } = {}
+for byte = 0, 255 do
+  local character = string.char(byte)
+  if not string.match(character, '[%w%._~-]') then SlugDashes[character] = '-' end
+end
 
-  for byte = 0, 255 do
-    local character = string.char(byte)
-
-    if byte >= 65 and byte <= 90 then
-      table.insert(from, character)
-      table.insert(to, string.char(byte + 32))
-    elseif not string.match(character, '[%w%._~-]') then
-      table.insert(from, character)
-      table.insert(to, '-')
-    end
-  end
-
-  return table.concat(from), table.concat(to)
-end)()
-
-local SlugOptions = table.freeze { collapse = '-', trimStart = '-', trimEnd = '-' }
+local Slug = bytes.rules { nocase = true, replace = SlugDashes, collapse = '-', trimStart = '-', trimEnd = '-' }
 
 --- `value` as a URL slug: lower case, every run of other characters one dash, none at the ends.
 function util.slugify(value: unknown): string
-  return bytes.translate(tostring(value), SlugFrom, SlugTo, SlugOptions)
+  return bytes.translate(tostring(value), Slug)
 end
 
 --- The text after the last dot of a path's file name, if it has one.
@@ -130,7 +119,7 @@ function util.pathExtension(path: string): string? return (string.match(path, '%
 
 --- A file's contents, or an error naming the file that is not there.
 function util.readRequired(path: string): string
-  local contents = jess.fs.read(path)
+  local contents = fs.readFileString(path)
   if contents == nil then error(`read {path}: file does not exist`, 0) end
 
   return contents
@@ -141,18 +130,19 @@ end
 function util.walk(root: string, files: { Entry }?, prefix: string?): { Entry }
   local found: { Entry } = files or {}
   local below = prefix or ''
-  if not jess.fs.isDir(root) then return found end
+  if not fs.isDir(root) then return found end
 
-  local names = jess.fs.list(root)
+  local names, problem = fs.list(root)
+  if not names then error(problem, 0) end
   table.sort(names)
 
   for _, name in names do
-    local path = jess.fs.join(root, name)
+    local path = fs.join(root, name)
     local relative = if below == '' then name else `{below}/{name}`
 
-    if jess.fs.isDir(path) then
+    if fs.isDir(path) then
       util.walk(path, found, relative)
-    elseif jess.fs.isFile(path) then
+    elseif fs.isFile(path) then
       table.insert(found, { path = path, relative = relative })
     end
   end
@@ -162,25 +152,29 @@ end
 
 --- Makes the folder `path` is in, when it names one.
 function util.ensureParent(path: string)
-  local parent = jess.fs.parent(path)
-  if parent and parent ~= '' then jess.fs.createDir(parent) end
+  local parent = fs.parent(path)
+  if parent and parent ~= '' then
+    local done, problem = fs.mkdir(parent, { recursive = true })
+    if not done then error(problem, 0) end
+  end
 end
 
 function util.write(path: string, data: string)
   util.ensureParent(path)
-  return jess.fs.write(path, data)
+  local done, problem = fs.writeFile(path, data, { atomic = true })
+  if not done then error(problem, 0) end
 end
 
 function util.copyFile(from: string, to: string)
   util.ensureParent(to)
-  return jess.fs.copy(from, to)
+  return fs.copy(from, to)
 end
 
 --- Copies every file below `from` to the same place below `to`, and counts them.
 function util.copyTree(from: string, to: string): number
   local entries = util.walk(from)
   for _, entry in entries do
-    util.copyFile(entry.path, jess.fs.join(to, entry.relative))
+    util.copyFile(entry.path, fs.join(to, entry.relative))
   end
 
   return #entries

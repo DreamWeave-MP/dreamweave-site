@@ -1,8 +1,10 @@
 local Util=require './util'
+local fs = require '@dream/fs'
 local M={}
 
 @native
 local function trim(s) return Util.trim(s) end
+
 @native
 local function indentOf(line)
     local prefix=string.match(line,'^(%s*)') or ''
@@ -10,8 +12,10 @@ local function indentOf(line)
     for i=1,#prefix do n+=string.sub(prefix,i,i)=='\t' and 2 or 1 end
     return n
 end
+
 local function dirname(path) return string.match(path,'^(.*)/[^/]+$') or '' end
 local function escapePattern(s) return (string.gsub(s,'([^%w])','%%%1')) end
+
 local function plainReplace(s,needle,repl)
     if needle=='' then return s end
     local out={};local at=1
@@ -28,12 +32,12 @@ local function resolveImport(currentRoot,name)
     name=string.gsub(name,';+$','')
     name=string.match(name,'^["\'](.-)["\']$') or name
     if string.match(name,'^url%(') or string.match(name,'^https?://') or string.match(name,'%.css$') then return nil end
-    local base=jess.fs.join(currentRoot,name)
+    local base=fs.join(currentRoot,name)
     local candidates={base..'.sass',base..'.scss'}
-    local dir=dirname(base);local file=jess.fs.fileName(base)
-    table.insert(candidates,jess.fs.join(dir,'_'..file..'.sass'))
-    table.insert(candidates,jess.fs.join(dir,'_'..file..'.scss'))
-    for _,p in ipairs(candidates) do if jess.fs.isFile(p) then return p end end
+    local dir=dirname(base);local file=fs.fileName(base)
+    table.insert(candidates,fs.join(dir,'_'..file..'.sass'))
+    table.insert(candidates,fs.join(dir,'_'..file..'.scss'))
+    for _,p in ipairs(candidates) do if fs.isFile(p) then return p end end
     return nil
 end
 
@@ -104,6 +108,7 @@ end
 
 local function envNew(parent) return {parent=parent,values={}} end
 local function envSet(env,k,v) env.values[k]=v end
+
 local function envGet(env,k)
     local e=env
     while e do local v=e.values[k];if v~=nil then return v end;e=e.parent end
@@ -112,12 +117,15 @@ end
 
 local function hexRgb(s)
     local hex=string.match(s,'^#([0-9a-fA-F]+)$');if not hex then return nil end
+
     if #hex==3 then
         return tonumber(string.sub(hex,1,1)..string.sub(hex,1,1),16),tonumber(string.sub(hex,2,2)..string.sub(hex,2,2),16),tonumber(string.sub(hex,3,3)..string.sub(hex,3,3),16)
     elseif #hex==6 then return tonumber(string.sub(hex,1,2),16),tonumber(string.sub(hex,3,4),16),tonumber(string.sub(hex,5,6),16) end
 end
+
 local function fmtByte(n) return math.max(0,math.min(255,math.floor(n+0.5))) end
 local function rgbHex(r,g,b) return string.format('#%02x%02x%02x',fmtByte(r),fmtByte(g),fmtByte(b)) end
+
 local function splitArgs(s)
     local out={};local depth=0;local quote=nil;local start=1
     for i=1,#s+1 do local c=string.sub(s,i,i)
@@ -127,12 +135,14 @@ local function splitArgs(s)
     end
     return out
 end
+
 local function evalColorFunction(value,env)
     local fn,args=string.match(value,'^([%w_-]+)%((.*)%)$');if not fn then return nil end
     local a=splitArgs(args)
     local function resolve(x)
         x=trim(x);if string.sub(x,1,1)=='$' then return envGet(env,string.sub(x,2)) or x end;return x
     end
+
     if fn=='mix' and #a>=2 then
         local c1,c2=resolve(a[1]),resolve(a[2]);local r1,g1,b1=hexRgb(c1);local r2,g2,b2=hexRgb(c2)
         if r1 and r2 then local p=0.5;if a[3] then p=(tonumber(string.match(resolve(a[3]),'([%d%.]+)%%')) or 50)/100 end;return rgbHex(r1*p+r2*(1-p),g1*p+g2*(1-p),b1*p+b2*(1-p)) end
@@ -143,6 +153,7 @@ local function evalColorFunction(value,env)
 end
 --- `value` with its `#{...}` interpolations and its `$variables` replaced from `env`, and worked
 --- out when what is left is one of the colour functions.
+
 local function substitute(value, env): string
   local text = tostring(value or '')
 
@@ -177,6 +188,7 @@ local function splitSelectors(s)
 end
 --- Every selector `child` lists under every selector of `parent`: after it and a space, or
 --- with the parent's own wherever the child's writes `&`.
+
 local function combineSelectors(parent: { string }?, child: string): { string }
   local children = splitSelectors(child)
   if not parent or #parent == 0 then return children end
@@ -194,6 +206,7 @@ local function property(text)
     if not name then name,value=string.match(text,'^(%-%-[%w-]+)%s*:%s*(.+)$') end
     return name,value
 end
+
 @native
 local function variable(text)
     return string.match(text,'^%$([%w_-]+)%s*:%s*(.*)$')
@@ -210,6 +223,7 @@ local function parseMixinHeader(text)
     end
     return name,params
 end
+
 @native
 local function parseInclude(text)
     local name,args=string.match(text,'^%+([%w_-]+)%s*%((.*)%)$');if not name then name=string.match(text,'^%+([%w_-]+)$');args='' end;return name,args
@@ -223,6 +237,7 @@ local function collect(root,state,currentSelectors)
             local selectors=currentSelectors
             local p=property(node.text);local v=variable(node.text)
             if not p and not v and string.sub(node.text,1,1)~='@' and string.sub(node.text,1,1)~='+' then selectors=combineSelectors(currentSelectors,node.text) end
+
             if string.match(node.text,'^@extend%s+') and currentSelectors then
                 local target=trim(string.match(node.text,'^@extend%s+(.+)$') or '')
                 state.extends[target]=state.extends[target] or {}
@@ -236,6 +251,7 @@ end
 local function expandExtends(selectors,state)
     local out={};local seen={}
     local function add(s) if not seen[s] then seen[s]=true;table.insert(out,s) end end
+
     for _,sel in ipairs(selectors or {}) do
         add(sel)
         for target,extenders in pairs(state.extends) do
@@ -296,6 +312,7 @@ end
 renderChildren=function(children,state,env,parentSelectors,out,depth)
     local declarations={}
     local function flush() emitRule(out,parentSelectors,declarations,state,depth);declarations={} end
+
     for _,node in ipairs(children) do
         local defName=parseMixinHeader(node.text)
         if defName then
@@ -341,14 +358,14 @@ end
 function M.compileDirectory(root,public)
     local count=0
     for _,entry in ipairs(Util.walk(root)) do
-        local name=jess.fs.fileName(entry.relative)
+        local name=fs.fileName(entry.relative)
         local ext=string.match(name,'%.([^%.]+)$')
         if (ext=='sass' or ext=='scss') and string.sub(name,1,1)~='_' then
             -- Indented .sass is the supported source dialect. SCSS is intentionally only accepted
             -- when it happens to contain indentation-compatible syntax; DreamWeave doesn't need a
             -- brace parser yet, despite threats from management.
             local outrel=string.gsub(entry.relative,'%.s[ac]ss$','.css')
-            Util.write(jess.fs.join(public,outrel),M.compileFile(entry.path));count+=1
+            Util.write(fs.join(public,outrel),M.compileFile(entry.path));count+=1
         end
     end
     return count

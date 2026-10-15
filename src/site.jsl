@@ -6,19 +6,23 @@ local Sass=require './sass'
 local JsonOut=require './json'
 local Json=require '@jess/json'
 local Yaml=require '@jess/yaml'
-local Toml=require '@jess/toml'
-local Bytes=require '@dream/bytes'
+local Toml=require '@jess/data/toml'
+local bytes=require '@dream/bytes'
+local fs = require '@dream/fs'
 local M={}
 
 local function norm(path)
     path=string.gsub(path,'\\','/');path=string.gsub(path,'^@/','');path=string.gsub(path,'^/+','');return path
 end
+
 @native
 local function dirname(path) local x=string.match(path,'^(.*)/[^/]+$');return x or '' end
+
 local function basename(path) return string.match(path,'([^/]+)$') or path end
 local function stem(path) return string.gsub(basename(path),'%.[^%.]+$','') end
 local function titleCase(s) s=string.gsub(s,'[-_]+',' ');return (string.gsub(s,'(%a)([%w]*)',function(a,b)return string.upper(a)..b end)) end
 local function decodeToml(text) local v=Toml.decode(text);return v end
+
 @native
 local function parseFrontmatter(text,path)
     text=string.gsub(text,'\r\n?','\n')
@@ -35,7 +39,7 @@ end
 local Site={};Site.__index=Site
 function Site.new(root,options)
     options=options or {}
-    local configPath=jess.fs.isFile(jess.fs.join(root,'config.toml')) and jess.fs.join(root,'config.toml') or jess.fs.join(root,'zola.toml')
+    local configPath=fs.isFile(fs.join(root,'config.toml')) and fs.join(root,'config.toml') or fs.join(root,'zola.toml')
     local config=decodeToml(Util.readRequired(configPath));config.extra=config.extra or {};config.markdown=config.markdown or {};config.default_language=config.default_language or 'en';config.title=config.title or 'Site';config.description=config.description or ''
     if options.baseUrl then config.base_url=options.baseUrl end
     if options.offline then config.build_search_index=false;config.generate_feeds=false;config.feed_filenames=nil;config.extra.dreamweave_offline=true end
@@ -44,6 +48,7 @@ function Site.new(root,options)
     self:registerFunctions();self:scan();self:connect();self:renderContent()
     return self
 end
+
 function Site:registerFunctions()
     self.engine:addFunction('load_data',function(args,named)
         local literal=named.literal
@@ -55,7 +60,7 @@ function Site:registerFunctions()
             if not format then format=Util.pathExtension(rel) end
             cacheKey=rel..'|'..string.lower(tostring(format or ''))
             local hit=rawget(self.dataCache,cacheKey);if hit~=nil then return hit end
-            local path=jess.fs.join(self.root,rel);text=jess.fs.read(path)
+            local path=fs.join(self.root,rel);text=fs.readFileString(path)
             if text==nil then if named.required==false then return false end;error(`load_data: {rel} does not exist`,0) end
         end
         format=string.lower(tostring(format or ''))
@@ -65,9 +70,11 @@ function Site:registerFunctions()
         elseif format=='yaml' or format=='yml' then result=Yaml.decode(text)
         elseif format=='plain' or format=='txt' or format=='' then result=text
         else error(`load_data: unsupported format {format}`,0) end
+
         if cacheKey then self.dataCache[cacheKey]=result end
         return result
     end)
+
     self.engine:addFunction('get_url',function(args,named)
         local path=tostring(Expr.unwrap(named.path or args[1] or ''));local result
         if string.match(path,'^https?://') or string.sub(path,1,1)=='#' then result=path
@@ -75,10 +82,12 @@ function Site:registerFunctions()
             local fragment=string.match(path,'(#.*)$') or ''
             local key=norm(string.gsub(path,'#.*$',''));local item=self.pagesBySource[key] or self.sectionsBySource[key];if not item then error(`get_url: unknown content path {path}`,0) end;result=item.permalink..fragment
         else result=Util.joinUrl(self.config.base_url or '',path) end
+
         if named.trailing_slash==false and string.sub(result,-1)=='/' then result=string.sub(result,1,-2)
         elseif named.trailing_slash==true and not string.find(result,'[%?#]') and string.sub(result,-1)~='/' and not string.match(result,'/[^/]+%.[%w]+$') then result..='/' end
+
         if named.cachebust==true and not string.match(path,'^https?://') then
-            local localPath=jess.fs.join(self.root,'static',norm(path));local bytes=jess.fs.read(localPath);if bytes then result..=(string.find(result,'?',1,true) and '&' or '?')..'h='..string.sub(Bytes.sha256(bytes),1,12) end
+            local localPath=fs.join(self.root,'static',norm(path));local content=fs.readFileString(localPath);if content then result..=(string.find(result,'?',1,true) and '&' or '?')..'h='..string.sub(bytes.sha256(content),1,12) end
         end
         return Tera.safe(result)
     end)
@@ -89,6 +98,7 @@ function Site:registerFunctions()
         if name then return Tera.safe(Util.joinUrl(self.config.base_url,kind..'/'..Util.slugify(Expr.unwrap(name))..'/')) end
         return Tera.safe(Util.joinUrl(self.config.base_url,kind..'/'))
     end)
+
     self.engine:addFunction('resize_image',function(args,named)
         local path=tostring(Expr.unwrap(named.path or args[1] or ''))
         local width=math.max(0,math.floor(tonumber(Expr.unwrap(named.width or 0)) or 0))
@@ -100,9 +110,9 @@ function Site:registerFunctions()
         local backend=self.options.imageBackend
         if not backend then return {url=originalUrl,width=width>0 and width or 1,height=height>0 and height or (width>0 and math.max(1,math.floor(width*0.5625)) or 1)} end
 
-        local sourcePath=jess.fs.join(self.root,path)
-        if not jess.fs.isFile(sourcePath) then sourcePath=jess.fs.join(self.root,rel) end
-        local source=jess.fs.read(sourcePath)
+        local sourcePath=fs.join(self.root,path)
+        if not fs.isFile(sourcePath) then sourcePath=fs.join(self.root,rel) end
+        local source=fs.readFileString(sourcePath)
         if source==nil then return {url=originalUrl,width=width>0 and width or 1,height=height>0 and height or 1} end
         local ok,img=pcall(function() return backend.read(sourcePath) end)
         if not ok or type(img)~='table' or not img.width or not img.height then
@@ -123,12 +133,13 @@ function Site:registerFunctions()
         elseif targetH<=0 then
             targetH=math.max(1,math.floor(img.height*targetW/img.width+0.5))
         end
-        local key=Bytes.sha256(source..'\0'..path..'\0'..tostring(targetW)..'x'..tostring(targetH)..'\0'..op)
+        local key=bytes.sha256(source..'\0'..path..'\0'..tostring(targetW)..'x'..tostring(targetH)..'\0'..op)
         local outRel='processed_images/'..string.sub(key,1,32)..'.png'
-        local outPath=jess.fs.join(self.options.public or jess.fs.join(self.root,'public'),outRel)
-        if not jess.fs.isFile(outPath) then
+        local outPath=fs.join(self.options.public or fs.join(self.root,'public'),outRel)
+        if not fs.isFile(outPath) then
             local resized=img:resize(targetW,targetH,false)
-            jess.fs.createDir(jess.fs.parent(outPath))
+            local succeeded, problem = fs.mkdir(fs.parent(outPath), { recursive = true })
+            if not succeeded then error(problem, 0) end
             local wok=pcall(function() backend.write(outPath,resized) end)
             if not wok then return {url=originalUrl,width=img.width,height=img.height} end
         end
@@ -157,7 +168,8 @@ function Site:isIgnored(relative: string): boolean
 end
 
 function Site:scan()
-    local contentRoot=jess.fs.join(self.root,'content');if not jess.fs.isDir(contentRoot) then return end
+    local contentRoot=fs.join(self.root,'content');if not fs.isDir(contentRoot) then return end
+
     for _,entry in ipairs(Util.walk(contentRoot)) do
         if string.match(entry.relative,'%.md$') and not self:isIgnored(entry.relative) then
             local meta,body=parseFrontmatter(Util.readRequired(entry.path),entry.relative);meta.extra=meta.extra or {};meta.taxonomies=meta.taxonomies or {}
@@ -178,6 +190,7 @@ end
 function Site:connect()
     table.sort(self.sections,function(a,b)return a.relative_path<b.relative_path end);table.sort(self.pages,function(a,b)return a.relative_path<b.relative_path end)
     local function sectionSource(dir) return dir=='' and '_index.md' or dir..'/_index.md' end
+
     for _,item in ipairs(self.sections) do
         local dir=dirname(item.relative_path);local ancestors={};local cursor=dirname(dir)
         if dir~='' then
@@ -185,6 +198,7 @@ function Site:connect()
             table.insert(ancestors,'_index.md');for i=1,#pieces-1 do table.insert(ancestors,pieces[i]) end
         end;item.ancestors=ancestors
     end
+
     for _,page in ipairs(self.pages) do
         local dir=dirname(page.relative_path);local ancestors={'_index.md'};local acc=''
         for part in string.gmatch(dir,'[^/]+') do acc=acc=='' and part or acc..'/'..part;local s=sectionSource(acc);if self.sectionsBySource[s] then table.insert(ancestors,s) end end
@@ -193,9 +207,11 @@ function Site:connect()
         if parent then table.insert(parent.pages,page) end
         for tag,values in pairs(page.taxonomies or {}) do self.taxonomies[tag]=self.taxonomies[tag] or {};for _,name in ipairs(values) do self.taxonomies[tag][name]=self.taxonomies[tag][name] or {};table.insert(self.taxonomies[tag][name],page) end end
     end
+
     for _,sec in ipairs(self.sections) do
         local dir=dirname(sec.relative_path);if sec.relative_path~='_index.md' then local parent=self.sectionsBySource[sectionSource(dirname(dir))];if parent then table.insert(parent.subsections,sec.relative_path) end end
     end
+
     for _,sec in ipairs(self.sections) do
         local sortBy=sec.sort_by or 'none'
         if sortBy=='title' then table.sort(sec.pages,function(a,b)return a.title<b.title end)
@@ -213,6 +229,7 @@ local function parseShortArgs(text,env)
         elseif (c==',' or i>#text) and depth==0 then local part=Util.trim(string.sub(text,start,i-1));if part~='' then local k,v=string.match(part,'^([%w_]+)%s*=%s*(.+)$');if k then named[k]=Expr.eval(v,env) end end;start=i+1 end
     end;return named
 end
+
 function Site:baseVars(item,isPage)
     local vars={config=self.config,lang=self.config.default_language,current_url=item and item.permalink or self.config.base_url}
     vars.page=isPage and item or false;vars.section=(not isPage) and item or false;return vars
@@ -303,20 +320,21 @@ function Site:shortcodes(text: string, item, isPage: boolean): string
   table.insert(done, string.sub(text, at))
   return table.concat(done)
 end
+
 @native
 function Site:resolveContentLink(href)
     if string.sub(href,1,2)=='@/' then local fragment=string.match(href,'(#.*)$') or '';local key=norm(string.gsub(href,'#.*$',''));local item=self.pagesBySource[key] or self.sectionsBySource[key];if item then return item.permalink..fragment end end
     return href
 end
-local WordSqueeze = table.freeze { collapse = ' ', trimStart = ' ', trimEnd = ' ' }
+local WordSqueeze = bytes.rules { replace = { ['\t'] = ' ', ['\n'] = ' ', ['\v'] = ' ', ['\f'] = ' ', ['\r'] = ' ' }, collapse = ' ', trimStart = ' ', trimEnd = ' ' }
 
 --- How many runs of characters that are not whitespace `text` holds outside its tags.
 @native
 local function countWords(text: string): number
-  local words = Bytes.translate((string.gsub(text, '<[^>]->', ' ')), '\t\n\v\f\r', '     ', WordSqueeze)
+  local words = bytes.translate((string.gsub(text, '<[^>]->', ' ')), WordSqueeze)
   if words == '' then return 0 end
 
-  return Bytes.count(words, ' ') + 1
+  return bytes.count(words, ' ') + 1
 end
 
 --- Renders every item's Markdown: its shortcodes expanded, then its content, its table of
@@ -364,22 +382,26 @@ function Site:pageTemplate(page)
     local parent=page.parent;if parent and parent.page_template then return parent.page_template end
     return 'page.html'
 end
+
 function Site:outputPath(item)
     local rel=string.gsub(item.path,'^/','');return rel=='' and 'index.html' or rel..'index.html'
 end
+
 function Site:renderItem(item,isPage)
-    local vars=self:baseVars(item,isPage);local template;if isPage then template=self:pageTemplate(item) elseif item.template then template=item.template elseif item.relative_path=='_index.md' and jess.fs.isFile(jess.fs.join(self.root,'templates','index.html')) then template='index.html' else template='section.html' end;return self.engine:render(template,vars)
+    local vars=self:baseVars(item,isPage);local template;if isPage then template=self:pageTemplate(item) elseif item.template then template=item.template elseif item.relative_path=='_index.md' and fs.isFile(fs.join(self.root,'templates','index.html')) then template='index.html' else template='section.html' end;return self.engine:render(template,vars)
 end
+
 function Site:copyContentAssets(public)
-    local root=jess.fs.join(self.root,'content');local count=0
-    for _,entry in ipairs(Util.walk(root)) do local base=jess.fs.fileName(entry.relative);if not self:isIgnored(entry.relative) and not string.match(entry.relative,'%.md$') and base~='mod.toml' and base~='mod.lock' then Util.copyFile(entry.path,jess.fs.join(public,entry.relative));count+=1 end end;return count
+    local root=fs.join(self.root,'content');local count=0
+    for _,entry in ipairs(Util.walk(root)) do local base=fs.fileName(entry.relative);if not self:isIgnored(entry.relative) and not string.match(entry.relative,'%.md$') and base~='mod.toml' and base~='mod.lock' then Util.copyFile(entry.path,fs.join(public,entry.relative));count+=1 end end;return count
 end
+
 function Site:buildTaxonomies(public)
     local count=0
     for kind,termsMap in pairs(self.taxonomies) do
         local terms={};for name,pages in pairs(termsMap) do table.insert(terms,{name=name,slug=Util.slugify(name),permalink=Util.joinUrl(self.config.base_url,kind..'/'..Util.slugify(name)..'/'),pages=pages}) end;table.sort(terms,function(a,b)return a.name<b.name end)
-        if #terms>0 then local html=self.engine:render('taxonomy_list.html',{config=self.config,taxonomy={name=kind},terms=terms,current_url=Util.joinUrl(self.config.base_url,kind..'/'),page=false,section=false,lang=self.config.default_language});Util.write(jess.fs.join(public,kind,'index.html'),html);count+=1 end
-        for _,term in ipairs(terms) do local html=self.engine:render('taxonomy_single.html',{config=self.config,taxonomy={name=kind},term=term,pages=term.pages,current_url=term.permalink,page=false,section=false,lang=self.config.default_language});Util.write(jess.fs.join(public,kind,term.slug,'index.html'),html);count+=1 end
+        if #terms>0 then local html=self.engine:render('taxonomy_list.html',{config=self.config,taxonomy={name=kind},terms=terms,current_url=Util.joinUrl(self.config.base_url,kind..'/'),page=false,section=false,lang=self.config.default_language});Util.write(fs.join(public,kind,'index.html'),html);count+=1 end
+        for _,term in ipairs(terms) do local html=self.engine:render('taxonomy_single.html',{config=self.config,taxonomy={name=kind},term=term,pages=term.pages,current_url=term.permalink,page=false,section=false,lang=self.config.default_language});Util.write(fs.join(public,kind,term.slug,'index.html'),html);count+=1 end
     end;return count
 end
 
@@ -388,6 +410,7 @@ local function xmlEscape(value)
     s=string.gsub(s,'&','&amp;');s=string.gsub(s,'<','&lt;');s=string.gsub(s,'>','&gt;');s=string.gsub(s,'"','&quot;');s=string.gsub(s,"'",'&apos;')
     return s
 end
+
 local function feedDate(value,atom)
     if not value then return nil end
     local s=tostring(value)
@@ -397,9 +420,9 @@ end
 -- The elements whose text is no part of a page's prose, from the opening tag to the first
 -- closing one, in any case.
 local ElementOptions = table.freeze { caseInsensitive = true, unicode = false, dotAll = true }
-local ScriptElement = Bytes.regex('<script[^>]*>.*?</script>', ElementOptions)
-local StyleElement = Bytes.regex('<style[^>]*>.*?</style>', ElementOptions)
-local PreElement = Bytes.regex('<pre[^>]*>.*?</pre>', ElementOptions)
+local ScriptElement = bytes.regex('<script[^>]*>.*?</script>', ElementOptions)
+local StyleElement = bytes.regex('<style[^>]*>.*?</style>', ElementOptions)
+local PreElement = bytes.regex('<pre[^>]*>.*?</pre>', ElementOptions)
 
 type Regex = typeof(ScriptElement)
 
@@ -422,19 +445,19 @@ local function blankElements(text: string, element: Regex): string
   return table.concat(kept, ' ')
 end
 
-local CollapseSpaces = table.freeze { collapse = ' ' }
-local CollapseLines = table.freeze { collapse = '\n', trimStart = '\n', trimEnd = '\n' }
+local CollapseSpaces = bytes.rules { replace = { ['\t'] = ' ', ['\v'] = ' ', ['\f'] = ' ', ['\r'] = ' ' }, collapse = ' ' }
+local CollapseLines = bytes.rules { collapse = '\n', trimStart = '\n', trimEnd = '\n' }
 
 --- `text` with every run of whitespace in a line made one space, each line trimmed, and the
 --- lines left empty dropped.
 local function squeezeLines(text: string): string
   -- A line between two newlines has at most one space at each end once its runs are collapsed,
   -- so taking the space beside every newline trims every line.
-  local spaced = Bytes.translate(`\n{text}\n`, '\t\v\f\r', '    ', CollapseSpaces)
+  local spaced = bytes.translate(`\n{text}\n`, CollapseSpaces)
   spaced = string.gsub(spaced, ' \n', '\n')
   spaced = string.gsub(spaced, '\n ', '\n')
 
-  return Bytes.translate(spaced, '', '', CollapseLines)
+  return bytes.translate(spaced, CollapseLines)
 end
 
 --- A page's HTML as the text a search index holds: no markup, no code blocks, entities read
@@ -455,6 +478,7 @@ local function cleanSearchBody(html: unknown, limit: number?): string
 
   return body
 end
+
 function Site:searchItems()
     local cfg=self.config.search or {};local out=JsonOut.array()
     local function add(item)
@@ -467,21 +491,24 @@ function Site:searchItems()
         if cfg.include_path==true then row.path=item.path end
         table.insert(out,row)
     end
+
     for _,section in ipairs(self.sections) do add(section) end
     for _,page in ipairs(self.pages) do add(page) end
     table.sort(out,function(a,b)return tostring(a.url)<tostring(b.url) end)
     return out
 end
+
 function Site:buildSearch(public)
     if self.config.build_search_index~=true then return 0 end
     local cfg=self.config.search or {};local format=cfg.index_format or 'elasticlunr_javascript'
     -- DreamWeave's current consumers use fuse_json. Fail rather than silently emit the wrong contract.
     if format~='fuse_json' then error('site.jpk currently supports search.index_format = "fuse_json"; got '..tostring(format),0) end
     local name='search_index.'..tostring(self.config.default_language or 'en')..'.json'
-    Util.write(jess.fs.join(public,name),JsonOut.encode(self:searchItems(),false))
+    Util.write(fs.join(public,name),JsonOut.encode(self:searchItems(),false))
     return 1
 end
 --- The pages a feed lists: rendered, not drafts, and dated; newest first, then by address.
+
 function Site:feedPages()
   local pages = [for page in self.pages if page.render and not page.draft and page.date => page]
 
@@ -494,6 +521,7 @@ function Site:feedPages()
 
   return pages
 end
+
 function Site:atomFeed(feedUrl,pages,section,term)
     local o={'<?xml version="1.0" encoding="UTF-8"?>\n<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="',xmlEscape(self.config.default_language or 'en'),'">\n<title>',xmlEscape(self.config.title or '')}
     if term then table.insert(o,' - '..xmlEscape(term.name)) elseif section and section.title then table.insert(o,' - '..xmlEscape(section.title)) end
@@ -513,24 +541,28 @@ function Site:atomFeed(feedUrl,pages,section,term)
     end
     table.insert(o,'</feed>\n');return table.concat(o)
 end
+
 function Site:rssFeed(feedUrl,pages,section,term)
     local title=self.config.title or '';if term then title..=' - '..tostring(term.name) elseif section and section.title then title..=' - '..tostring(section.title) end
     local o={'<?xml version="1.0" encoding="UTF-8"?>\n<rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel>\n<title>',xmlEscape(title),'</title>\n<link>',xmlEscape(section and section.permalink or self.config.base_url),'</link>\n<description>',xmlEscape(self.config.description or ''),'</description>\n<generator>Zola</generator>\n<language>',xmlEscape(self.config.default_language or 'en'),'</language>\n<atom:link href="',xmlEscape(feedUrl),'" rel="self" type="application/rss+xml"/>\n'}
     for _,p in ipairs(pages) do local author=(p.authors and p.authors[1]) or self.config.author or 'Unknown';table.insert(o,'<item><title>'..xmlEscape(p.title or '')..'</title>');if p.date then table.insert(o,'<pubDate>'..xmlEscape(feedDate(p.date,false))..'</pubDate>') end;table.insert(o,'<author>'..xmlEscape(author)..'</author><link>'..xmlEscape(p.permalink)..'</link><guid>'..xmlEscape(p.permalink)..'</guid><description xml:base="'..xmlEscape(p.permalink)..'">'..xmlEscape((p.summary and p.summary~='') and p.summary or p.content)..'</description></item>\n') end
     table.insert(o,'</channel></rss>\n');return table.concat(o)
 end
+
 function Site:buildFeeds(public)
     if self.config.generate_feeds~=true then return 0 end
     local filenames=self.config.feed_filenames or {'atom.xml'};local pages=self:feedPages();local count=0
-    for _,name in ipairs(filenames) do local url=Util.joinUrl(self.config.base_url or '',name);local data;if string.lower(name)=='rss.xml' then data=self:rssFeed(url,pages,nil,nil) else data=self:atomFeed(url,pages,nil,nil) end;Util.write(jess.fs.join(public,name),data);count+=1 end
+    for _,name in ipairs(filenames) do local url=Util.joinUrl(self.config.base_url or '',name);local data;if string.lower(name)=='rss.xml' then data=self:rssFeed(url,pages,nil,nil) else data=self:atomFeed(url,pages,nil,nil) end;Util.write(fs.join(public,name),data);count+=1 end
     return count
 end
+
 function Site:buildAliases(public)
     local count=0
-    for _,item in ipairs(self.pages) do for _,alias in ipairs(item.aliases or {}) do local rel=norm(alias);if rel~='' then local dest=string.match(rel,'%.html$') and rel or (string.gsub(rel,'/+$','')..'/index.html');local html='<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url='..Util.escapeAttribute(item.permalink)..'"><link rel="canonical" href="'..Util.escapeAttribute(item.permalink)..'">';Util.write(jess.fs.join(public,dest),html);count+=1 end end end
+    for _,item in ipairs(self.pages) do for _,alias in ipairs(item.aliases or {}) do local rel=norm(alias);if rel~='' then local dest=string.match(rel,'%.html$') and rel or (string.gsub(rel,'/+$','')..'/index.html');local html='<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url='..Util.escapeAttribute(item.permalink)..'"><link rel="canonical" href="'..Util.escapeAttribute(item.permalink)..'">';Util.write(fs.join(public,dest),html);count+=1 end end end
     return count
 end
 --- Writes `sitemap.xml`: every section and page that has a page of its own, by address.
+
 function Site:buildSitemap(public: string): number
   local entries = [
     for section in self.sections
@@ -554,29 +586,31 @@ function Site:buildSitemap(public: string): number
   end
 
   table.insert(out, '</urlset>\n')
-  Util.write(jess.fs.join(public, 'sitemap.xml'), table.concat(out))
+  Util.write(fs.join(public, 'sitemap.xml'), table.concat(out))
 
   return 1
 end
+
 function Site:buildRobots(public)
-    local path=jess.fs.join(public,'robots.txt');if jess.fs.isFile(path) then return 0 end
+    local path=fs.join(public,'robots.txt');if fs.isFile(path) then return 0 end
     Util.write(path,'User-agent: *\nDisallow:\nAllow: /\nSitemap: '..Util.joinUrl(self.config.base_url or '','sitemap.xml')..'\n');return 1
 end
+
 function Site:build404(public)
-    if not jess.fs.isFile(jess.fs.join(self.root,'templates','404.html')) then return 0 end
+    if not fs.isFile(fs.join(self.root,'templates','404.html')) then return 0 end
     local html=self.engine:render('404.html',{config=self.config,page=false,section=false,lang=self.config.default_language,current_url=Util.joinUrl(self.config.base_url or '','404.html')})
-    Util.write(jess.fs.join(public,'404.html'),html);return 1
+    Util.write(fs.join(public,'404.html'),html);return 1
 end
 
 function Site:build(public)
     self.options.public=public
-    jess.fs.createDir(public);local rendered=0
-    if jess.fs.isDir(jess.fs.join(self.root,'static')) then Util.copyTree(jess.fs.join(self.root,'static'),public) end
+    local made,problem=fs.mkdir(public, { recursive = true });if not made then error(problem,0) end;local rendered=0
+    if fs.isDir(fs.join(self.root,'static')) then Util.copyTree(fs.join(self.root,'static'),public) end
     self:copyContentAssets(public)
-    for _,s in ipairs(self.sections) do if s.render and not s.draft and not s.redirect_to then local ok,html=pcall(function() return self:renderItem(s,false) end);if not ok then error('section '..tostring(s.relative_path)..': '..tostring(html),0) end;Util.write(jess.fs.join(public,self:outputPath(s)),html);rendered+=1 end end
-    for _,p in ipairs(self.pages) do if p.render and not p.draft and not p.redirect_to then local ok,html=pcall(function() return self:renderItem(p,true) end);if not ok then error('page '..tostring(p.relative_path)..': '..tostring(html),0) end;Util.write(jess.fs.join(public,self:outputPath(p)),html);rendered+=1 end end
+    for _,s in ipairs(self.sections) do if s.render and not s.draft and not s.redirect_to then local ok,html=pcall(function() return self:renderItem(s,false) end);if not ok then error('section '..tostring(s.relative_path)..': '..tostring(html),0) end;Util.write(fs.join(public,self:outputPath(s)),html);rendered+=1 end end
+    for _,p in ipairs(self.pages) do if p.render and not p.draft and not p.redirect_to then local ok,html=pcall(function() return self:renderItem(p,true) end);if not ok then error('page '..tostring(p.relative_path)..': '..tostring(html),0) end;Util.write(fs.join(public,self:outputPath(p)),html);rendered+=1 end end
     local tax=self:buildTaxonomies(public)
-    if jess.fs.isDir(jess.fs.join(self.root,'sass')) then Sass.compileDirectory(jess.fs.join(self.root,'sass'),public) end
+    if fs.isDir(fs.join(self.root,'sass')) then Sass.compileDirectory(fs.join(self.root,'sass'),public) end
     local feeds=self:buildFeeds(public);local search=self:buildSearch(public);local aliases=self:buildAliases(public);local special=self:buildSitemap(public)+self:buildRobots(public)+self:build404(public)
     return {pages=rendered,taxonomies=tax,sections=#self.sections,content_pages=#self.pages,feeds=feeds,search=search,aliases=aliases,special=special}
 end
