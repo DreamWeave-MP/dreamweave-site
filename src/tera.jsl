@@ -1,4 +1,3 @@
---!native
 local Util=require './util'
 local Expr=require './expr'
 local JsonOut=require './json'
@@ -20,6 +19,7 @@ local function valueString(v, escape)
     return escape and Util.escapeHtml(s) or s
 end
 
+@native
 local function tokenise(text)
     local tokens={};local at=1;local trimNext=false
     local function push(kind,content)
@@ -52,8 +52,10 @@ local function tokenise(text)
 end
 
 local Parser={};Parser.__index=Parser
+@native
 local function word(s) return string.match(s,'^([%w_]+)') or '' end
 function Parser.new(text,name) return setmetatable({tokens=tokenise(text),at=1,name=name},Parser) end
+@native
 function Parser:seq(stops)
     local nodes={}
     while self.at<=#self.tokens do
@@ -130,6 +132,7 @@ function Env:child() return Env.new(self.engine,self.globals,self) end
 --- What a plain name is bound to in `environment`: its own local, or what its parent answers,
 --- or its global, or one of the engine's functions. A name a parent leaves undefined is still
 --- looked for among this environment's globals and functions.
+@native
 local function lookup(environment, name: string)
   local value = rawget(environment.locals, name)
   if value ~= nil then return value end
@@ -147,6 +150,7 @@ local function lookup(environment, name: string)
 end
 
 --- What `name` is bound to, or `UNDEF`. `space::member` is the member of what `space` names.
+@native
 function Env:get(name: string)
   local separator = string.find(name, '::', 1, true)
   if not separator then return lookup(self, name) end
@@ -183,6 +187,7 @@ local function sortedCopy(items,attribute)
 end
 local function stripTags(s) return (string.gsub(tostring(s),'<[^>]->','')) end
 
+@native
 function Env:filter(name,value,args,named)
     local v=Expr.unwrap(value)
     if name=='safe' then return safe(v==UNDEF and '' or v)
@@ -288,6 +293,7 @@ function Engine:namespace(name,caller)
     end
     return ns
 end
+@native
 function Engine:prepare(nodes,env)
     for _,n in ipairs(nodes) do
         if n.kind=='import' then env:set(n.as,self:namespace(n.path,env),false) end
@@ -329,6 +335,7 @@ local function iterPairs(value): ({ unknown }, { unknown })
 end
 
 --- What the expression `text` is worth in `environment`.
+@native
 local function evalExpr(text: string, environment)
   -- An expression raises on text it cannot read, on a filter, a test or a function it does not
   -- have, and on whatever a function a site registered raises. The error is raised again here
@@ -341,6 +348,7 @@ end
 
 --- Appends what `nodes` render to in `environment` to `out`, and answers `'break'` or
 --- `'continue'` when one of those tags stopped the nodes early.
+@native
 local function renderInto(engine, out: { string }, nodes, environment, blocks): string?
   for _, node in ipairs(nodes) do
     local kind = node.kind

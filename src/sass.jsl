@@ -1,8 +1,9 @@
---!native
 local Util=require './util'
 local M={}
 
+@native
 local function trim(s) return Util.trim(s) end
+@native
 local function indentOf(line)
     local prefix=string.match(line,'^(%s*)') or ''
     local n=0
@@ -39,6 +40,7 @@ end
 --- A stylesheet's text with every `@import` of a Sass file replaced by that file's own text,
 --- expanded the same way. `stack` holds the files being expanded, so one that imports itself is
 --- caught.
+@native
 local function loadExpanded(path: string, stack: { [string]: boolean }?): string
   local open = stack or {}
   if open[path] then error(`sass import cycle: {path}`, 0) end
@@ -169,6 +171,7 @@ local function substitute(value, env): string
   return evalColorFunction(text, env) or text
 end
 
+@native
 local function splitSelectors(s)
     local out={};for x in string.gmatch(s..',','(.-),') do x=trim(x);if x~='' then table.insert(out,x) end end;return out
 end
@@ -185,15 +188,18 @@ local function combineSelectors(parent: { string }?, child: string): { string }
   ]
 end
 
+@native
 local function property(text)
     local name,value=string.match(text,'^([%-%w]+)%s*:%s+(.+)$')
     if not name then name,value=string.match(text,'^(%-%-[%w-]+)%s*:%s*(.+)$') end
     return name,value
 end
+@native
 local function variable(text)
     return string.match(text,'^%$([%w_-]+)%s*:%s*(.*)$')
 end
 
+@native
 local function parseMixinHeader(text)
     local name,args=string.match(text,'^=([%w_-]+)%s*%((.*)%)$')
     if not name then name=string.match(text,'^=([%w_-]+)$');args='' end
@@ -204,6 +210,7 @@ local function parseMixinHeader(text)
     end
     return name,params
 end
+@native
 local function parseInclude(text)
     local name,args=string.match(text,'^%+([%w_-]+)%s*%((.*)%)$');if not name then name=string.match(text,'^%+([%w_-]+)$');args='' end;return name,args
 end

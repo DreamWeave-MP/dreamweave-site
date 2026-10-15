@@ -1,5 +1,4 @@
 --!strict
---!native
 -- The Markdown the site's pages are written in, rendered to the HTML Zola made of it: inline
 -- spans, and a document's blocks with the table of contents its headings give.
 local bytes = require '@dream/bytes'
@@ -28,6 +27,7 @@ local Backtick, Tilde, Hash, Equals, Dash, Star, Underscore, Plus, Greater, Less
   96, 126, 35, 61, 45, 42, 95, 43, 62, 60
 
 --- The closing parenthesis of a link target that opens before `start`, counting the pairs inside.
+@native
 local function linkFinish(text: string, start: number): number?
   local depth = 0
 
@@ -70,6 +70,7 @@ local function underscoreClose(text: string, start: number): number?
 end
 
 --- A link target as written, split into the address and the quoted title after it.
+@native
 local function splitHref(raw: string): (string, string?)
   local target = util.trim(raw)
   local href, title = string.match(target, '^(.-)%s+["\'](.-)["\']%s*$')
@@ -96,6 +97,7 @@ local Special = table.freeze {
 -- a pattern's character class does, over the plain text that lies between them.
 local NextSpecial = bytes.regex('[!\\[`*_~<\\\\]', { unicode = false })
 
+@native
 local function inline(text: string, options: Options?): string
   local given = options or NoOptions
   local length = #text
@@ -277,6 +279,7 @@ local function cells(line: string): { string }
 end
 
 --- A heading's anchor, made unique among `seen` by a number after it.
+@native
 local function slug(title: string, seen: { [string]: boolean }): string
   -- Zola's default anchor strategy is classic slugification. Preserve characters inside
   -- code spans long enough for '_' to become '-' (rather than deleting it as emphasis syntax).
@@ -307,6 +310,7 @@ end
 local Blank = -1
 
 --- The first byte of `line` that is not space, or `Blank`.
+@native
 local function leadOf(line: string): number
   local start = string.find(line, '%S')
   return if start then string.byte(line, start) else Blank
@@ -328,6 +332,7 @@ local function startsBlock(line: string, lead: number): boolean
   return (leadsRule(lead) and rule(line)) or (leadsList(lead) and listItem(line) ~= nil)
 end
 
+@native
 function markdown.renderDocument(text: string, options: Options?): Document
   local given = options or NoOptions
   local lines = string.split((string.gsub(text, '\r\n?', '\n')), '\n')
