@@ -76,3 +76,63 @@ What is left of the build is mostly not Luau. `jess.fs.write` replaces a file th
 temporary, about 1 ms a file here, so 119 written files are roughly 125 ms of head's 357: a third
 of the build, and the reason it moved 1.6x where loading moved 2.3x. The package still writes
 through it.
+
+## Which modules are native, and why
+
+Jess compiles to machine code only what is marked (`--!native` on a module, `@native` on one
+function), and every load pays for what is marked. A module carries `--!native` when a row below
+spends its time there and the module is small (12 KB or less); a larger module carries `@native`
+on the functions the row spends its time in, and nothing else.
+
+Measured 2026-10-15 with `jess 0.1.0`, the verified release build of jess `07c38cb` on l3i
+2.0.3, on the i7-10870H, the one-minute load 1.24 and 1.12 at the start of the two
+sessions. In each session the bench ran alternately on this package and on a copy of it with
+every module marked, three fresh runs of `bench/bench.jsl` each, every run's row the median of
+its batches; a column is the median of the three, and a ratio is against the all-marked runs of
+the same session. Which functions a row spends its time in comes from `jess run --profile` of
+that row alone, unmarked. The load cost is a fresh `jess run --package <this package>
+--package-path jpk` of a script that only requires `@dreamweave/site`, the two sides alternating, the
+median of five each after one warm-up.
+
+| Requiring `@dreamweave/site` | All marked | This state |
+| --- | ---: | ---: |
+| Unmarked | 0.237 s | 0.174 s |
+| Final | 0.112 s | 0.096 s |
+
+| Row | All marked (ms) | Unmarked / all marked | Final (ms) | Final / all marked |
+| --- | ---: | ---: | ---: | ---: |
+| load: scan, shortcodes and markdown | 1.147 | 1.024× | 1.172 | 1.022× |
+| build: the whole site, load to last write | 26.74 | 0.940× | 27.04 | 1.011× |
+| render: every item through its template | 1.684 | **1.722×** | 1.904 | **1.130×** |
+| markdown: every item's source as a document | 0.1875 | **1.514×** | 0.1916 | 1.022× |
+| markdown: every line as inline text | 0.08257 | **1.578×** | 0.08338 | 1.010× |
+| sass: every stylesheet, imports expanded | 0.3135 | **1.447×** | 0.3809 | **1.215×** |
+| search: clean every body and encode the index | 0.1667 | **1.276×** | 0.1726 | 1.035× |
+| json: every item's metadata, compact and pretty | 0.3458 | **1.542×** | 0.3389 | 0.980× |
+| tera: parse every template | 1.236 | **1.615×** | 1.224 | 0.990× |
+| expr: fifteen expressions against every item | 0.3345 | **2.106×** | 0.3512 | 1.050× |
+| util: escapeHtml over every line | 0.01274 | **1.552×** | 0.01291 | 1.014× |
+| util: trim over every line | 0.00395 | **1.916×** | 0.00400 | 1.013× |
+| util: slugify over every line | 0.05284 | **1.099×** | 0.05311 | 1.005× |
+| util: split every line on spaces | 0.03711 | **1.528×** | 0.03698 | 0.996× |
+| util: five globs against every content path | 0.2428 | **1.350×** | 0.2430 | 1.001× |
+| util: walk the content folder | 0.1273 | **1.140×** | 0.1258 | 0.989× |
+
+What carries the directive (every module and function here is one a row spends its time in,
+unmarked):
+
+- Whole: `expr`, `json`, `util`.
+- `markdown`, by function: `linkFinish`, `splitHref`, `inline`, `slug`, `leadOf`,
+  `markdown.renderDocument`.
+- `sass`, by function: `trim`, `indentOf`, `loadExpanded`, `splitSelectors`, `property`, `variable`,
+  `parseMixinHeader`, `parseInclude`.
+- `site`, by function: `dirname`, `parseFrontmatter`, `Site.shortcodes`, `Site.resolveContentLink`,
+  `countWords`, `render`, `cleanSearchBody`.
+- `tera`, by function: `tokenise`, `word`, `Parser.seq`, `lookup`, `Env.get`, `Env.filter`,
+  `Engine.prepare`, `evalExpr`, `renderInto`.
+
+The two rows still above 5% are rendering every item through its template (1.13x, of a 1.7 ms
+row) and expanding every stylesheet (1.22x, of 0.3 ms): 0.3 ms between them, on a build this
+state makes 0.017 s cheaper to start. The two sessions disagreed by half on what requiring
+`@dreamweave/site` costs all marked (0.238 s and 0.112 s), so only each session's own ratio
+holds; the site's build bench (`tools/bench/site.jsl` in jess) is the measure of the whole.
