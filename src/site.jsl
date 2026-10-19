@@ -633,6 +633,28 @@ function Site:buildFeeds(public)
     return count
 end
 
+--- Writes the page of every section or page with `redirect_to`: a redirect to that address,
+--- relative to the site's root when it is not absolute, as Zola writes one.
+function Site:buildRedirects(public: string): number
+    local count=0
+    for _,list in ipairs({self.sections,self.pages}) do
+        for _,item in ipairs(list) do
+            local target=item.redirect_to
+            if type(target)~='string' or target=='' or item.draft then continue end
+
+            local url=target
+            if not string.match(target,'^https?://') then
+                url=Util.joinUrl(self.config.base_url or '',target)
+                if not string.match(url,'[#?]') and not string.match(url,'/[^/]+%.[%w]+$') and string.sub(url,-1)~='/' then url..='/' end
+            end
+
+            local html='<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url='..Util.escapeAttribute(url)..'"><link rel="canonical" href="'..Util.escapeAttribute(url)..'">'
+            Util.write(fs.join(public,self:outputPath(item)),html);count+=1
+        end
+    end
+    return count
+end
+
 function Site:buildAliases(public)
     local count=0
     for _,item in ipairs(self.pages) do for _,alias in ipairs(item.aliases or {}) do local rel=norm(alias);if rel~='' then local dest=string.match(rel,'%.html$') and rel or (string.gsub(rel,'/+$','')..'/index.html');local html='<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url='..Util.escapeAttribute(item.permalink)..'"><link rel="canonical" href="'..Util.escapeAttribute(item.permalink)..'">';Util.write(fs.join(public,dest),html);count+=1 end end end
@@ -687,6 +709,7 @@ function Site:build(public)
     self:copyContentAssets(public)
     for _,s in ipairs(self.sections) do if s.render and not s.draft and not s.redirect_to then local ok,html=pcall(function() return self:renderItem(s,false) end);if not ok then error('section '..tostring(s.relative_path)..': '..tostring(html),0) end;Util.write(fs.join(public,self:outputPath(s)),html);rendered+=1 end end
     for _,p in ipairs(self.pages) do if p.render and not p.draft and not p.redirect_to then local ok,html=pcall(function() return self:renderItem(p,true) end);if not ok then error('page '..tostring(p.relative_path)..': '..tostring(html),0) end;Util.write(fs.join(public,self:outputPath(p)),html);rendered+=1 end end
+    local redirects=self:buildRedirects(public)
     local tax=self:buildTaxonomies(public)
     Sass.compileSources({
       list = function(): { string } return self:sourceList('sass/') end,
@@ -696,6 +719,12 @@ function Site:build(public)
     return {pages=rendered,taxonomies=tax,sections=#self.sections,content_pages=#self.pages,feeds=feeds,search=search,aliases=aliases,special=special}
 end
 M.Site=Site
-function M.load(root,options) return Site.new(root,options) end
-function M.build(root,public,options) return Site.new(root,options):build(public) end
+--- What a build counts: pages rendered, taxonomies, sections, content pages, feeds, search
+--- indexes, aliases, and the special files (sitemap, robots, 404).
+export type Report = { pages: number, taxonomies: number, sections: number, content_pages: number, feeds: number, search: number, aliases: number, special: number }
+
+function M.load(root: string, options: { [string]: unknown }?) return Site.new(root, options) end
+function M.build(root: string, public: string, options: { [string]: unknown }?): Report
+    return (Site.new(root, options):build(public) :: any) :: Report
+end
 return M

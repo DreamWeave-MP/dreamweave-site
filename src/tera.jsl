@@ -241,7 +241,13 @@ function Env:filter(name,value,args,named)
     elseif name=='int' then return math.floor(tonumber(v) or 0)
     elseif name=='filesizeformat' then local n=tonumber(v) or 0;if n<1024 then return `{n} B` elseif n<1048576 then return string.format('%.1f kB',n/1024) elseif n<1073741824 then return string.format('%.1f MB',n/1048576) else return string.format('%.1f GB',n/1073741824) end
     elseif name=='slugify' then return Util.slugify(v)
-    elseif name=='markdown' then local md=self.engine.markdown;if not md then return tostring(v or '') end;return safe(md.render(tostring(v or ''),{inline=named.inline==true}))
+    elseif name=='markdown' then
+        -- Zola's filter resolves `@/` links through the site's permalinks; so does this one, when
+        -- the engine renders for a site. A shortcode's body is where most of them come through.
+        local md=self.engine.markdown;if not md then return tostring(v or '') end
+        local site=self.engine.site
+        local resolve=if site and site.resolveContentLink then function(href: string): string? return site:resolveContentLink(href) end else nil
+        return safe(md.render(tostring(v or ''),{inline=named.inline==true,resolveLink=resolve}))
     elseif name=='date' then return tostring(v or '')
     end
     error(`unsupported template filter: {name}`,0)

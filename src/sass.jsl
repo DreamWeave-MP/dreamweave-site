@@ -39,7 +39,13 @@ local function resolveImport(currentRoot: string, name: string, reader: Reader):
     name=string.gsub(name,';+$','')
     name=string.match(name,'^["\'](.-)["\']$') or name
     if string.match(name,'^url%(') or string.match(name,'^https?://') or string.match(name,'%.css$') then return nil end
-    local base=if currentRoot=='' then name else `{currentRoot}/{name}`
+    local joined=if currentRoot=='' then name else `{currentRoot}/{name}`
+    -- `..` and `.` folded, so a theme's `@import ../tokens` names the same path a site's file does.
+    local parts={}
+    for segment in string.gmatch(joined,'[^/]+') do
+        if segment=='..' then table.remove(parts) elseif segment~='.' then table.insert(parts,segment) end
+    end
+    local base=(if string.sub(joined,1,1)=='/' then '/' else '')..table.concat(parts,'/')
     local candidates={base..'.sass',base..'.scss'}
     local dir=dirname(base);local file=basename(base)
     table.insert(candidates,if dir=='' then '_'..file..'.sass' else `{dir}/_{file}.sass`)
