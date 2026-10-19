@@ -770,6 +770,61 @@ suite.describe('site', function()
     expect(function() site.load(`{root}/absent`) end).toThrow 'zola.toml: file does not exist'
   end)
 
+  suite.it('reads templates, stylesheets and static files through its themes, the site first', function()
+    local function memoryTheme(files: { [string]: string }): site.Theme
+      local paths: { string } = {}
+
+      for path in files do
+        table.insert(paths, path)
+      end
+
+      table.sort(paths)
+
+      return {
+        files = paths,
+        read = function(path: string): buffer?
+          local text = files[path]
+
+          return if text then buffer.fromstring(text) else nil
+        end,
+      }
+    end
+
+    local theme = memoryTheme {
+      ['templates/index.html'] = '<h1>theme {{ section.title }}</h1>',
+      ['templates/page.html'] = '<p>theme page</p>',
+      ['templates/404.html'] = 'theme 404',
+      ['templates/partials/foot.html'] = '<footer>{{ config.title }}</footer>',
+      ['sass/site.sass'] = '@import tokens\nbody\n  color: $ink\n',
+      ['sass/_tokens.sass'] = '$ink: black\n',
+      ['static/theme.txt'] = 'from the theme\n',
+      ['static/shared.txt'] = 'theme copy\n',
+    }
+    local later = memoryTheme { ['static/theme.txt'] = 'from a later theme\n', ['static/later.txt'] = 'later\n' }
+    local root = tree {
+      ['config.toml'] = 'base_url = "https://themed.test"\ntitle = "Themed"\n',
+      ['content/_index.md'] = '+++\ntitle = "Root"\n+++\n',
+      ['content/page.md'] = '+++\ntitle = "Page"\n+++\n',
+      ['templates/page.html'] = '<p>site page</p>{% include "partials/foot.html" %}',
+      ['templates/section.html'] = '',
+      ['sass/_tokens.sass'] = '$ink: red\n',
+      ['static/shared.txt'] = 'site copy\n',
+    }
+    local report = site.build(root, `{root}/public`, { themes = { theme, later } })
+    expect(report.pages).toBe(2)
+    expect(fs.readFileString(`{root}/public/index.html`)).toBe '<h1>theme Root</h1>'
+    expect(fs.readFileString(`{root}/public/page/index.html`)).toBe '<p>site page</p><footer>Themed</footer>'
+    expect(fs.readFileString(`{root}/public/404.html`)).toBe 'theme 404'
+    expect(fs.readFileString(`{root}/public/site.css`)).toBe 'body {\n  color: red;\n}\n'
+    expect(fs.readFileString(`{root}/public/shared.txt`)).toBe 'site copy\n'
+    expect(fs.readFileString(`{root}/public/theme.txt`)).toBe 'from the theme\n'
+    expect(fs.readFileString(`{root}/public/later.txt`)).toBe 'later\n'
+
+    local bare = tree { ['config.toml'] = 'base_url = "https://bare.test"\n', ['content/_index.md'] = '' }
+    expect(function() site.build(bare, `{bare}/public`, { themes = { 1 } }) end).toThrow 'themes[1] is not a theme'
+    expect(function() site.build(bare, `{bare}/public`, { themes = { memoryTheme {} } }) end).toThrow 'templates/section.html: file does not exist'
+  end)
+
   suite.it('builds a small site, titles from slugs where a page gives none', function()
     local root = smallSite { ['content/some_long-name.md'] = 'No frontmatter at all.\n' }
     local report = site.build(root, `{root}/public`)

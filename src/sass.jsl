@@ -14,6 +14,7 @@ local function indentOf(line)
 end
 
 local function dirname(path) return string.match(path,'^(.*)/[^/]+$') or '' end
+local function basename(path) return string.match(path,'([^/]+)$') or path end
 local function escapePattern(s) return (string.gsub(s,'([^%w])','%%%1')) end
 
 local function plainReplace(s,needle,repl)
@@ -27,17 +28,23 @@ local function plainReplace(s,needle,repl)
     return table.concat(out)
 end
 
-local function resolveImport(currentRoot,name)
+--- Where a stylesheet's files are read from: `read` answers a path's text or nil, so one source
+--- is a folder on disk and another a site and the themes laid under it.
+export type Reader = { read: (path: string) -> string? }
+
+local DiskReader: Reader = { read = function(path: string): string? return fs.readFileString(path) end }
+
+local function resolveImport(currentRoot: string, name: string, reader: Reader): string?
     name=trim(name)
     name=string.gsub(name,';+$','')
     name=string.match(name,'^["\'](.-)["\']$') or name
     if string.match(name,'^url%(') or string.match(name,'^https?://') or string.match(name,'%.css$') then return nil end
-    local base=fs.join(currentRoot,name)
+    local base=if currentRoot=='' then name else `{currentRoot}/{name}`
     local candidates={base..'.sass',base..'.scss'}
-    local dir=dirname(base);local file=fs.fileName(base)
-    table.insert(candidates,fs.join(dir,'_'..file..'.sass'))
-    table.insert(candidates,fs.join(dir,'_'..file..'.scss'))
-    for _,p in ipairs(candidates) do if fs.isFile(p) then return p end end
+    local dir=dirname(base);local file=basename(base)
+    table.insert(candidates,if dir=='' then '_'..file..'.sass' else `{dir}/_{file}.sass`)
+    table.insert(candidates,if dir=='' then '_'..file..'.scss' else `{dir}/_{file}.scss`)
+    for _,p in ipairs(candidates) do if reader.read(p)~=nil then return p end end
     return nil
 end
 
@@ -45,19 +52,23 @@ end
 --- expanded the same way. `stack` holds the files being expanded, so one that imports itself is
 --- caught.
 @native
-local function loadExpanded(path: string, stack: { [string]: boolean }?): string
+local function loadExpanded(path: string, stack: { [string]: boolean }?, reader: Reader?): string
   local open = stack or {}
+  local source = reader or DiskReader
   if open[path] then error(`sass import cycle: {path}`, 0) end
 
   open[path] = true
-  local text = string.gsub(Util.readRequired(path), '\r\n?', '\n')
+  local contents = source.read(path)
+  if contents == nil then error(`read {path}: file does not exist`, 0) end
+
+  local text = string.gsub(contents, '\r\n?', '\n')
   local root = dirname(path)
   local out = {}
 
   for _, line in string.split(text, '\n') do
     local imported = string.match(line, '^%s*@import%s+(.+)$')
-    local resolved = if imported then resolveImport(root, imported) else nil
-    table.insert(out, if resolved then loadExpanded(resolved, open) else line)
+    local resolved = if imported then resolveImport(root, imported, source) else nil
+    table.insert(out, if resolved then loadExpanded(resolved, open, source) else line)
   end
 
   open[path] = nil
@@ -355,17 +366,36 @@ function M.compileFile(path)
     return compileText(loadExpanded(path))
 end
 
+--- Whether `path` names a stylesheet to compile on its own: `.sass` or `.scss`, not a partial.
+local function isEntry(path: string): boolean
+    local name=basename(path)
+    local ext=string.match(name,'%.([^%.]+)$')
+    -- Indented .sass is the supported source dialect. SCSS is intentionally only accepted
+    -- when it happens to contain indentation-compatible syntax; DreamWeave doesn't need a
+    -- brace parser yet, despite threats from management.
+    return (ext=='sass' or ext=='scss') and string.sub(name,1,1)~='_'
+end
+
 function M.compileDirectory(root,public)
     local count=0
     for _,entry in ipairs(Util.walk(root)) do
-        local name=fs.fileName(entry.relative)
-        local ext=string.match(name,'%.([^%.]+)$')
-        if (ext=='sass' or ext=='scss') and string.sub(name,1,1)~='_' then
-            -- Indented .sass is the supported source dialect. SCSS is intentionally only accepted
-            -- when it happens to contain indentation-compatible syntax; DreamWeave doesn't need a
-            -- brace parser yet, despite threats from management.
+        if isEntry(entry.relative) then
             local outrel=string.gsub(entry.relative,'%.s[ac]ss$','.css')
             Util.write(fs.join(public,outrel),M.compileFile(entry.path));count+=1
+        end
+    end
+    return count
+end
+
+--- Every stylesheet `sources.list()` names under `sass/`, compiled through `sources.read` with its
+--- imports resolved the same way, into `public` without the `sass/` prefix.
+function M.compileSources(sources: { list: () -> { string }, read: (path: string) -> string? }, public: string): number
+    local count=0
+    local reader: Reader = { read = sources.read }
+    for _,path in ipairs(sources.list()) do
+        if string.sub(path,1,5)=='sass/' and isEntry(path) then
+            local outrel=string.gsub(string.sub(path,6),'%.s[ac]ss$','.css')
+            Util.write(fs.join(public,outrel),compileText(loadExpanded(path,nil,reader)));count+=1
         end
     end
     return count

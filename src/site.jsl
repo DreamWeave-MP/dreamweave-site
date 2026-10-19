@@ -37,16 +37,93 @@ local function parseFrontmatter(text,path)
 end
 
 local Site={};Site.__index=Site
+--- A theme: a package's payload as @dreamweave/theme hands it out, or anything shaped like it:
+--- every path it holds, and a read of one path's bytes. Laid under the site's own files.
+export type Theme = { files: { string }, read: (path: string) -> buffer? }
+
 function Site.new(root,options)
     options=options or {}
     local configPath=fs.isFile(fs.join(root,'config.toml')) and fs.join(root,'config.toml') or fs.join(root,'zola.toml')
     local config=decodeToml(Util.readRequired(configPath));config.extra=config.extra or {};config.markdown=config.markdown or {};config.default_language=config.default_language or 'en';config.title=config.title or 'Site';config.description=config.description or ''
     if options.baseUrl then config.base_url=options.baseUrl end
     if options.offline then config.build_search_index=false;config.generate_feeds=false;config.feed_filenames=nil;config.extra.dreamweave_offline=true end
-    local self=setmetatable({root=root,config=config,pages={},sections={},pagesBySource={},sectionsBySource={},taxonomies={},options=options,dataCache={},ignoreCache={}},Site)
-    self.engine=Tera.Engine.new(root,{markdown=Markdown,site=self})
+    local self=setmetatable({root=root,config=config,pages={},sections={},pagesBySource={},sectionsBySource={},taxonomies={},options=options,dataCache={},ignoreCache={},themes=options.themes or {}},Site)
+    for index, theme in ipairs(self.themes) do
+      if type(theme) ~= 'table' or type(theme.files) ~= 'table' or type(theme.read) ~= 'function' then
+        error(`themes[{index}] is not a theme: a theme is a table with files, its paths, and read, a function from a path to its bytes`, 0)
+      end
+    end
+
+    self.engine=Tera.Engine.new(root,{markdown=Markdown,site=self,read=function(name) return self:sourceText(`templates/{name}`) end})
     self:registerFunctions();self:scan();self:connect();self:renderContent()
     return self
+end
+
+--- `relative` (`templates/base.html`, `sass/_tokens.sass`) as the site's own files hold it, else as
+--- the first theme that does: a site's file wins over a theme's, and an earlier theme over a later.
+function Site:sourceText(relative: string): string?
+  local own = fs.readFileString(fs.join(self.root, relative))
+  if own ~= nil then return own end
+
+  for _, theme in ipairs(self.themes) do
+    local data = theme.read(relative)
+    if data then return buffer.tostring(data) end
+  end
+
+  return nil
+end
+
+function Site:sourceExists(relative: string): boolean
+  if fs.isFile(fs.join(self.root, relative)) then return true end
+
+  for _, theme in ipairs(self.themes) do
+    if theme.read(relative) then return true end
+  end
+
+  return false
+end
+
+--- Every path under `prefix` (`sass/`) the site or a theme holds, each once, in name order.
+function Site:sourceList(prefix: string): { string }
+  local seen: { [string]: boolean } = {}
+  local paths: { string } = {}
+
+  for _, entry in ipairs(Util.walk(fs.join(self.root, prefix))) do
+    local path = `{prefix}{entry.relative}`
+    seen[path] = true
+    table.insert(paths, path)
+  end
+
+  for _, theme in ipairs(self.themes) do
+    for _, path in ipairs(theme.files) do
+      if string.sub(path, 1, #prefix) == prefix and not seen[path] then
+        seen[path] = true
+        table.insert(paths, path)
+      end
+    end
+  end
+
+  table.sort(paths)
+
+  return paths
+end
+
+--- Writes every theme file under `static/` the site has no file for into `public`.
+function Site:copyThemeStatic(public: string): number
+  local count = 0
+
+  for _, path in ipairs(self:sourceList('static/')) do
+    local relative = string.sub(path, 8)
+    if fs.isFile(fs.join(self.root, path)) then continue end
+
+    local text = self:sourceText(path)
+    if text then
+      Util.write(fs.join(public, relative), text)
+      count += 1
+    end
+  end
+
+  return count
 end
 
 function Site:registerFunctions()
@@ -87,7 +164,7 @@ function Site:registerFunctions()
         elseif named.trailing_slash==true and not string.find(result,'[%?#]') and string.sub(result,-1)~='/' and not string.match(result,'/[^/]+%.[%w]+$') then result..='/' end
 
         if named.cachebust==true and not string.match(path,'^https?://') then
-            local localPath=fs.join(self.root,'static',norm(path));local content=fs.readFileString(localPath);if content then result..=(string.find(result,'?',1,true) and '&' or '?')..'h='..string.sub(bytes.sha256(content),1,12) end
+            local content=self:sourceText(`static/{norm(path)}`);if content then result..=(string.find(result,'?',1,true) and '&' or '?')..'h='..string.sub(bytes.sha256(content),1,12) end
         end
         return Tera.safe(result)
     end)
@@ -388,7 +465,7 @@ function Site:outputPath(item)
 end
 
 function Site:renderItem(item,isPage)
-    local vars=self:baseVars(item,isPage);local template;if isPage then template=self:pageTemplate(item) elseif item.template then template=item.template elseif item.relative_path=='_index.md' and fs.isFile(fs.join(self.root,'templates','index.html')) then template='index.html' else template='section.html' end;return self.engine:render(template,vars)
+    local vars=self:baseVars(item,isPage);local template;if isPage then template=self:pageTemplate(item) elseif item.template then template=item.template elseif item.relative_path=='_index.md' and self:sourceExists('templates/index.html') then template='index.html' else template='section.html' end;return self.engine:render(template,vars)
 end
 
 function Site:copyContentAssets(public)
@@ -597,7 +674,7 @@ function Site:buildRobots(public)
 end
 
 function Site:build404(public)
-    if not fs.isFile(fs.join(self.root,'templates','404.html')) then return 0 end
+    if not self:sourceExists('templates/404.html') then return 0 end
     local html=self.engine:render('404.html',{config=self.config,page=false,section=false,lang=self.config.default_language,current_url=Util.joinUrl(self.config.base_url or '','404.html')})
     Util.write(fs.join(public,'404.html'),html);return 1
 end
@@ -606,11 +683,15 @@ function Site:build(public)
     self.options.public=public
     local made,problem=fs.mkdir(public, { recursive = true });if not made then error(problem,0) end;local rendered=0
     if fs.isDir(fs.join(self.root,'static')) then Util.copyTree(fs.join(self.root,'static'),public) end
+    self:copyThemeStatic(public)
     self:copyContentAssets(public)
     for _,s in ipairs(self.sections) do if s.render and not s.draft and not s.redirect_to then local ok,html=pcall(function() return self:renderItem(s,false) end);if not ok then error('section '..tostring(s.relative_path)..': '..tostring(html),0) end;Util.write(fs.join(public,self:outputPath(s)),html);rendered+=1 end end
     for _,p in ipairs(self.pages) do if p.render and not p.draft and not p.redirect_to then local ok,html=pcall(function() return self:renderItem(p,true) end);if not ok then error('page '..tostring(p.relative_path)..': '..tostring(html),0) end;Util.write(fs.join(public,self:outputPath(p)),html);rendered+=1 end end
     local tax=self:buildTaxonomies(public)
-    if fs.isDir(fs.join(self.root,'sass')) then Sass.compileDirectory(fs.join(self.root,'sass'),public) end
+    Sass.compileSources({
+      list = function(): { string } return self:sourceList('sass/') end,
+      read = function(path: string): string? return self:sourceText(path) end,
+    }, public)
     local feeds=self:buildFeeds(public);local search=self:buildSearch(public);local aliases=self:buildAliases(public);local special=self:buildSitemap(public)+self:buildRobots(public)+self:build404(public)
     return {pages=rendered,taxonomies=tax,sections=#self.sections,content_pages=#self.pages,feeds=feeds,search=search,aliases=aliases,special=special}
 end

@@ -269,7 +269,7 @@ local function callable(fn) return {__dw_callable=true,fn=fn} end
 
 function Engine.new(root,options)
     options=options or {}
-    local self=setmetatable({root=root,templateRoot=fs.join(root,options.templateDir or 'templates'),cache={},functions={},markdown=options.markdown,site=options.site},Engine)
+    local self=setmetatable({root=root,templateRoot=fs.join(root,options.templateDir or 'templates'),cache={},functions={},markdown=options.markdown,site=options.site,read=options.read},Engine)
     self.functions.range=callable(function(_,named)
         local start=tonumber(named.start or 0) or 0;local finish=tonumber(named['end'] or 0) or 0;local step=tonumber(named.step_by or 1) or 1;local out={};for i=start,finish-step,step do table.insert(out,i) end;return out
     end)
@@ -281,7 +281,13 @@ function Engine:addFunction(name,fn) self.functions[name]=callable(fn) end
 
 function Engine:parse(name)
     local hit=self.cache[name];if hit then return hit end
-    local path=fs.join(self.templateRoot,name);local text=Util.readRequired(path);local ast=Parser.new(text,name):parse();self.cache[name]=ast;return ast
+    local path=fs.join(self.templateRoot,name)
+    -- A site with themes reads a template through them, the site's own copy first; the message
+    -- names where the site's copy would be, which is where a person looks.
+    local text=if self.read then self.read(name) else Util.readRequired(path)
+    if text==nil then error(`read {path}: file does not exist`,0) end
+
+    local ast=Parser.new(text,name):parse();self.cache[name]=ast;return ast
 end
 
 local function collectMacros(nodes,out)
