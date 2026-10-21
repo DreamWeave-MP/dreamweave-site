@@ -13,9 +13,9 @@ name: Build, release and publish
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
     # Release tags only: a version always starts with a digit, and slugs cannot contain '-'.
-    tags: ['*-[0-9]*']
+    tags: ["*-[0-9]*"]
   pull_request:
   workflow_dispatch:
 
@@ -33,5 +33,5 @@ jobs:
       contents: write # releases, and the mod.lock commit
       id-token: write # Sigstore and Pages
       pages: write
-    uses: DreamWeave-MP/StroggForge/.github/workflows/modGlobalBuild.yml@v58
+    uses: DreamWeave-MP/StroggForge/.github/workflows/modGlobalBuild.yml@v60
     secrets: inherit
